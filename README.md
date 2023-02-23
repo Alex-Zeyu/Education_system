@@ -10,3 +10,6 @@
 /save_models 存放模型参数
 
   
+讨论文档
+
+https://docs.google.com/document/d/1WtRBurgM0hCP9dAOTWbeflZLqnrBYmgahczSglolGOg/edit
