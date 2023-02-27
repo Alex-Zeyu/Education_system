@@ -32,25 +32,29 @@ def load_dataset(data_path):
 
 
 
-def embed_text(text, model_name='roberta-base', output_dim=128):
-    # Load the RoBERTa model and tokenizer
-    tokenizer = RobertaTokenizer.from_pretrained(model_name)
-    model = RobertaModel.from_pretrained(model_name)
+def get_roberta_embeddings(input_text, max_length=512, feature_size=128):
+    tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+    model = RobertaModel.from_pretrained('roberta-base')
 
-    # Define a projection layer to change the output tensor dimension
-    projection_layer = nn.Linear(model.config.hidden_size, output_dim)
+    encoded_input = tokenizer.encode_plus(
+        input_text,
+        add_special_tokens=True,
+        max_length=max_length,
+        truncation=True,
+        padding='max_length',
+        return_attention_mask=True,
+        return_tensors='pt'
+    )
 
-    # Prepare the input
-    inputs = tokenizer(text, return_tensors='pt')
+    with torch.no_grad():
+        model_output = model(**encoded_input)
 
-    # Perform forward pass
-    outputs = model(**inputs)
+    features = model_output.last_hidden_state[:, 0, :]
+    features = torch.nn.functional.normalize(features, p=2, dim=1)
+    features = features.squeeze(0)
+    features = features[:feature_size]
 
-    # Use the projection layer to change the output tensor dimension
-    reshaped_outputs = projection_layer(outputs.last_hidden_state[:, 0, :])
-
-    # Return the output tensor
-    return reshaped_outputs
+    return features
 
 
 
@@ -60,7 +64,7 @@ if __name__ == "__main__":
     # print(dataset)
     for row in dataset:
         row_str = ' '.join(map(str, row))
-        encoder = embed_text(row_str)
+        encoder = get_roberta_embeddings(row_str)
         print(encoder)
 
 
