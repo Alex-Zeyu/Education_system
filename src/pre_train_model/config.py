@@ -19,7 +19,7 @@ class Config:
     # ['AvgQuality', 'TotalResponses', 'TotalRatings', 'Answer', 'Num_options', 'Question', 'OptionA', 'OptionB', 'OptionC', 'OptionD', 'OptionE', 'Explanation', 'Tags']
     semantic_features = ['AvgQuality', 'TotalResponses', 'TotalRatings', 'Answer', 'Num_options', 'Question', 'OptionA', 'OptionB', 'OptionC', 'OptionD', 'OptionE', 'Explanation', 'Tags']
 
-    emb_method = 'glove'  # glove/glove_finetuned/sbert/sbert_roberta_finetuned/roberta/roberta_finetuned
+    emb_method = 'glove'  # glove/roberta-base_raw/roberta-base_Document
     semantic_enc_method = 'transformer'  # rnn/transformer
     enable_attention_scorer = False  # True to enable transformer layer to calculate attention score and encode the score as additional features
 
