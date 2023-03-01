@@ -128,7 +128,7 @@ def run(round_i: int):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # TODO: ADD NLP model & optimizer
-    nlp_model = NLPModel(max_length=512, feature_size=128, device=device).to(device)
+    nlp_model = NLPModel(max_length=512, feature_size=args.emb_size, device=device).to(device)
     nlp_optimizer = torch.optim.Adam(nlp_model.parameters(), lr=args.nlp_lr)
 
     # train model
@@ -141,7 +141,7 @@ def run(round_i: int):
         # TODO: training the NLP model
         nlp_model.train()
         # TODO: question embeddings using NLP
-        qus_emb = torch.cat([nlp_model(text).unsqueeze(0) for text in qus_text_arr], dim=0)
+        qus_emb = torch.cat([nlp_model(text) for text in qus_text_arr], dim=0)
         # TODO: new embedding using random user embedding and NLP question embedding
         x = torch.cat([usr_emb, qus_emb], dim=0)  # user embedding first
 

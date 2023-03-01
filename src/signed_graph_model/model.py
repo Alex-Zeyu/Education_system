@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class SGNNEnc(torch.nn.Module):
     """Learn the embeddings for each node"""
 
-    def __init__(self, usr_num, qus_num, args):
+    def __init__(self, usr_num, qus_num, input_dim, args):
         super(SGNNEnc, self).__init__()
 
         self.args = args
@@ -15,10 +15,10 @@ class SGNNEnc(torch.nn.Module):
         self.usr_num, self.qus_num = usr_num, qus_num  # user and question number
 
         # linear transformation
-        self.linear_g1 = torch.nn.Linear(self.emb_size, self.emb_size, bias=False)  # graph 1
-        self.linear_g2 = torch.nn.Linear(self.emb_size, self.emb_size, bias=False)  # graph 2
-        self.linear_g3 = torch.nn.Linear(self.emb_size, self.emb_size, bias=False)  # graph 3
-        self.linear_g4 = torch.nn.Linear(self.emb_size, self.emb_size, bias=False)  # graph 4
+        self.linear_g1 = torch.nn.Linear(input_dim, self.emb_size, bias=False)  # graph 1
+        self.linear_g2 = torch.nn.Linear(input_dim, self.emb_size, bias=False)  # graph 2
+        self.linear_g3 = torch.nn.Linear(input_dim, self.emb_size, bias=False)  # graph 3
+        self.linear_g4 = torch.nn.Linear(input_dim, self.emb_size, bias=False)  # graph 4
 
         # signed convolution layers
         self.sconv_p1 = SignedGCN(self.emb_size, self.emb_size, num_layers=args.num_layers)  # perspective 1
