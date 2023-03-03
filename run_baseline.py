@@ -45,6 +45,10 @@ question_path = os.path.join(dataset_path, 'Questions_CourseX.xlsx')
 graph_data = GraphData(answer_path, question_path)
 graph_data.summary()  # print some information
 
+# generate random embeddings
+x = torch.rand(generator=torch.manual_seed(args.seed),
+               size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+
 # used for train-test split
 seeds = generate_random_seeds(args.rounds, args.seed)
 
@@ -112,9 +116,6 @@ def run(round_i: int):
     edges = edge_index_g1, edge_index_g2, edge_index_g3_u, edge_index_g3_q, edge_index_g4_u, edge_index_g4_q
     # positive, negative edge mask
     masks = mask_g1, mask_g2, mask_g3_u, mask_g3_q, mask_g4_u, mask_g4_q
-    # generate random embeddings
-    x = torch.rand(generator=torch.manual_seed(args.seed),
-                   size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
 
     # build model
     seed_everything(args.seed)
