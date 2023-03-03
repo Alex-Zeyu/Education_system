@@ -45,7 +45,7 @@ class GraphData:
         print(f'number of questions: {self.qus_num}\n')
 
 
-def create_perspectives(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def create_perspectives(arr: np.ndarray, args) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return perspective 1 (inter): edge index user->question &
     perspective 2 (intra): edge index user->user, question->question
     """
@@ -82,16 +82,22 @@ def create_perspectives(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nda
     perspective_2_q = []
 
     for u in adj_list_u_u.keys():
-        for u2, sign in adj_list_u_u[u].items():
+        for u2, val in adj_list_u_u[u].items():
             if u == u2:
                 continue
-            perspective_2_u.append([u, u2, sign])
+            if val >= args.usr_pos_thres:
+                perspective_2_u.append([u, u2, 1])
+            elif val <= args.usr_neg_thres:  # should be a negative number
+                perspective_2_u.append([u, u2, -1])
 
     for q in adj_list_q_q.keys():
-        for q2, sign in adj_list_q_q[q].items():
+        for q2, val in adj_list_q_q[q].items():
             if q == q2:
                 continue
-            perspective_2_q.append([q, q2, sign])
+            if val >= args.qus_pos_thres:
+                perspective_2_q.append([q, q2, 1])
+            elif val <= args.qus_neg_thres:  # should be a negative number
+                perspective_2_q.append([q, q2, -1])
 
     return perspective_1, np.array(perspective_2_u).T, np.array(perspective_2_q).T
 

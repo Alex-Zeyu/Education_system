@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
 parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
 parser.add_argument('--emb_size', type=int, default=128, help='Embedding dimension for each node.')
-parser.add_argument('--num_layers', type=int, default=2, help='Number of SignedGCN (implemented by pyg) layers.')
+parser.add_argument('--num_layers', type=int, default=1, help='Number of SignedGCN (implemented by pyg) layers.')
 parser.add_argument('--dropout', type=float, default=0.5, help='Dropout parameter.')
 parser.add_argument('--linear_predictor_layers', type=int, default=1,
                     help='Number of MLP layers (0-4) to make prediction from learned embeddings.')
@@ -25,6 +25,14 @@ parser.add_argument('--train_test_ratio', type=float, default=0.2, help='Split t
 parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
 parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
 parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
+parser.add_argument('--usr_pos_thres', type=int, default=2,
+                    help='The positive threshold to link edges between users in perspective 2.')
+parser.add_argument('--usr_neg_thres', type=int, default=-2,
+                    help='The negative threshold to link edges between users in perspective 2. (negative value)')
+parser.add_argument('--qus_pos_thres', type=int, default=5,
+                    help='The positive threshold to link edges between questions in perspective 2.')
+parser.add_argument('--qus_neg_thres', type=int, default=-5,
+                    help='The negative threshold to link edges between questions in perspective 2. (negative value)')
 
 args = parser.parse_args()
 print(args)
@@ -64,7 +72,7 @@ def run(round_i: int):
     trn_data, tst_data = train_test_split(graph_data.data, args.train_test_ratio, seed=seeds[round_i])
 
     # create perspective 1 and perspective 2 (user-question, user-user, question-question)
-    p1, p2u, p2q = create_perspectives(trn_data)
+    p1, p2u, p2q = create_perspectives(trn_data, args)
 
     # data augmentation
     # Graph 1
@@ -110,7 +118,7 @@ def run(round_i: int):
 
     # build model
     seed_everything(args.seed)
-    model = SGNNEnc(graph_data.usr_num, graph_data.qus_num, args).to(device)
+    model = SGNNEnc(graph_data.usr_num, graph_data.qus_num, args.emb_size, args).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # train model
