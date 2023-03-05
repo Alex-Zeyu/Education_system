@@ -63,7 +63,6 @@ qus_sent_arr = [Sentence(s) for s in qus_text_arr]  # sentence array
 # TODO: use pretrained NLP model
 nlp_emb_size = 768
 nlp_model = TransformerDocumentEmbeddings('roberta-base')
-nlp_linear = torch.nn.Linear(nlp_emb_size, args.emb_size).to(device)
 
 # TODO: generate question embeddings
 for s in qus_sent_arr:
@@ -147,7 +146,7 @@ def run(round_i: int):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # TODO: add a linear layer to the NLP model
-    nlp_linear.reset_parameters()
+    nlp_linear = torch.nn.Linear(nlp_emb_size, args.emb_size).to(device)
     nlp_optimizer = torch.optim.Adam(nlp_linear.parameters(), lr=args.nlp_lr)
 
     # train model
@@ -158,7 +157,7 @@ def run(round_i: int):
         nlp_linear.train()
 
         qus_emb0 = nlp_linear(qus_emb)
-        qus_emb0 = torch.nn.functional.relu(qus_emb0)   # non-linear activation
+        qus_emb0 = torch.nn.functional.relu(qus_emb0)  # non-linear activation
         qus_emb0 = torch.nn.functional.dropout(qus_emb0, 0.5)
         x = torch.cat([usr_emb, qus_emb0], dim=0)
 
@@ -175,7 +174,7 @@ def run(round_i: int):
         optimizer.step()
 
         model.eval()
-        nlp_linear.eval()    # TODO
+        nlp_linear.eval()
         temp_res = {}
         with torch.no_grad():
             y_score_trn = model.predict_edges(model.emb_out, uid_trn, qid_trn)
