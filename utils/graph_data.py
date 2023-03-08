@@ -121,6 +121,25 @@ def train_test_split(arr: np.ndarray, test_ratio: float, seed: int) -> tuple[np.
     return trn_arr, tst_arr
 
 
+def split_edges(edge_index: torch.Tensor, test_ratio: float = 0.2) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Splits the edges :obj:`edge_index` into train and test edges.
+
+    Args:
+        edge_index (LongTensor): The edge indices.
+        test_ratio (float, optional): The ratio of test edges.
+            (default: :obj:`0.2`)
+
+    Source: https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/nn/models/signed_gcn.html#SignedGCN.split_edges
+    """
+    mask = torch.ones(edge_index.size(1), dtype=torch.bool)
+    mask[torch.randperm(mask.size(0))[:int(test_ratio * mask.size(0))]] = 0
+
+    train_edge_index = edge_index[:, mask]
+    test_edge_index = edge_index[:, ~mask]
+
+    return train_edge_index, test_edge_index
+
+
 def perturb_structure(perspective: np.ndarray, augment: str, args) -> torch.Tensor:
     """Perturb the edge index array with label, perspective: np.array with shape (3, n_edges)"""
     new_edge_index = perspective.copy()  # copy of the original edge index
