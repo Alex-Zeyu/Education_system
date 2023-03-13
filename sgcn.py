@@ -86,9 +86,8 @@ if __name__ == '__main__':
         train_neg_edge_index, test_neg_edge_index = model.split_edges(neg_edge_index, args.train_test_ratio)
 
         # user and question embeddings (can't learn stuff)
-        # x = torch.rand(generator=torch.manual_seed(args.seed),
-        #                size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
-        x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)
+        x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+        # x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)
 
         best_res = {'test_auc': 0, 'test_f1': 0}
 

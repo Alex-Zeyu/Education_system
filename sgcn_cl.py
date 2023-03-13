@@ -20,7 +20,7 @@ parser.add_argument('--mask_ratio', type=float, default=0.1, help='Random mask r
 parser.add_argument('--beta', type=float, default=5e-4, help='Control contribution of loss contrastive.')
 parser.add_argument('--alpha', type=float, default=0.8, help='Control the contribution of inter and intra loss.')
 parser.add_argument('--tau', type=float, default=0.05, help='Temperature parameter.')
-parser.add_argument('--lr', type=float, default=0.005, help='Initial learning rate.')
+parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
 parser.add_argument('--train_test_ratio', type=float, default=0.2, help='Split the training and test set.')
 parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
 parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
@@ -46,8 +46,12 @@ graph_data = GraphData(answer_path, question_path)
 graph_data.summary()  # print some information
 
 # generate random embeddings
-x = torch.rand(generator=torch.manual_seed(args.seed),
-               size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+
+# build model
+seed_everything(args.seed)
+model = SGNNEnc(graph_data.usr_num, graph_data.qus_num, args.emb_size, args).to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
 # used for train-test split
 seeds = generate_random_seeds(args.rounds, args.seed)
@@ -70,11 +74,11 @@ def test_and_val(y_score, y, mode='test', epoch=0):
 
 
 def run(round_i: int):
-    seed_everything(args.seed)
+    model.reset_parameters()
+    seed_everything(seeds[round_i])
 
     # train-test split
     trn_data, tst_data = train_test_split(graph_data.data, args.train_test_ratio, seed=seeds[round_i])
-
     # create perspective 1 and perspective 2 (user-question, user-user, question-question)
     p1, p2u, p2q = create_perspectives(trn_data, args)
 
@@ -117,11 +121,6 @@ def run(round_i: int):
     # positive, negative edge mask
     masks = mask_g1, mask_g2, mask_g3_u, mask_g3_q, mask_g4_u, mask_g4_q
 
-    # build model
-    seed_everything(args.seed)
-    model = SGNNEnc(graph_data.usr_num, graph_data.qus_num, args.emb_size, args).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
     # train model
     best_res = {'test_auc': 0, 'test_f1': 0}
 
@@ -140,9 +139,7 @@ def run(round_i: int):
         model.eval()
         temp_res = {}
         with torch.no_grad():
-            y_score_trn = model.predict_edges(model.emb_out, uid_trn, qid_trn)
             y_score_tst = model.predict_edges(model.emb_out, uid_tst, qid_tst)
-            temp_res.update(test_and_val(y_score_trn, trn_y, mode='train', epoch=epoch))
             temp_res.update(test_and_val(y_score_tst, tst_y, mode='test', epoch=epoch))
         if temp_res['test_auc'] + temp_res['test_f1'] > best_res['test_auc'] + best_res['test_f1']:
             best_res = temp_res
@@ -152,11 +149,8 @@ def run(round_i: int):
 
 
 if __name__ == '__main__':
-    results = []
-
-    for i in range(args.rounds):
-        results.append(run(i))
+    results = [run(i) for i in range(args.rounds)]
 
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'BaseLine_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', 'sgcn_cl_baseLine_' + args.dataset + '.pkl')
     save_as_df(results, save_path)

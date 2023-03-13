@@ -40,9 +40,34 @@ class GraphData:
     def summary(self):
         """Print some information about the data"""
         print('\nData Summary:')
-        print(f'number of edges: {len(self.data)}')
+        print(f'number of nodes: {self.usr_num + self.qus_num}')
         print(f'number of users: {self.usr_num}')
-        print(f'number of questions: {self.qus_num}\n')
+        print(f'number of questions: {self.qus_num}')
+        print(f'number of edges: {len(self.data)}')
+        print(f'number of positive edges: {(self.data[:, 2] == 1).sum()}')
+        print(f'number of negative edges: {(self.data[:, 2] == -1).sum()}\n')
+
+    def get_balance_score(self, show=False):
+        import networkx as nx
+
+        sign_dict = {}
+        G = nx.Graph()
+        for src, dst, sign in self.data:
+            sign_dict[(src, dst)] = sign
+            sign_dict[(dst, src)] = sign
+            G.add_edge(src, dst)
+        circles = nx.cycle_basis(G)
+        butflys = [circle for circle in circles if len(circle) == 4]
+        balance_butflys = [b for b in butflys if
+                           sign_dict[b[0], b[1]] * sign_dict[b[1], b[2]] * sign_dict[b[2], b[3]] * sign_dict[
+                               b[3], b[0]] > 0]
+        balance_score = len(balance_butflys) / len(butflys)
+
+        if show:
+            print(f'number of butterflies: {len(butflys)}')
+            print(f'number of balance butterflies: {len(balance_butflys)}')
+            print(f'balance score: {balance_score}')
+        return balance_score
 
 
 def create_perspectives(arr: np.ndarray, args) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
