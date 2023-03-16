@@ -23,9 +23,12 @@ def collate_fn(batch):
     return data, label
 
 # load data
-def load_dataset(data_path):
+def load_dataset(data_frame, data_path):
     cols = opt.semantic_features + opt.handcrafted_features
-    data_frame = pd.read_excel(data_path, usecols=cols)
+    if data_frame is None:
+        data_frame = pd.read_excel(data_path, usecols=cols)
+    else:
+        data_frame = data_frame[cols]
     dataset = data_frame.values
 
     # normalize opt.handcrafted_features

@@ -37,7 +37,7 @@ class GraphData:
         self.data = self.data.to_numpy()
         self.data[:, 1] += self.usr_num  # add offset to question id
 
-    def summary(self):
+    def summary(self) -> None:
         """Print some information about the data"""
         print('\nData Summary:')
         print(f'number of nodes: {self.usr_num + self.qus_num}')
@@ -47,7 +47,7 @@ class GraphData:
         print(f'number of positive edges: {(self.data[:, 2] == 1).sum()}')
         print(f'number of negative edges: {(self.data[:, 2] == -1).sum()}\n')
 
-    def get_balance_score(self, show=False):
+    def get_balance_score(self, show: bool = False) -> float:
         import networkx as nx
 
         sign_dict = {}
@@ -68,6 +68,11 @@ class GraphData:
             print(f'number of balance butterflies: {len(balance_butflys)}')
             print(f'balance score: {balance_score}')
         return balance_score
+
+    def get_question_df(self) -> pd.DataFrame:
+        qus_valid = self.ans[['QuestionID']].merge(self.qus, on='QuestionID')
+        qus_valid = qus_valid.drop_duplicates(subset=['QuestionID']).sort_values(by=['QuestionID'], ignore_index=True)
+        return qus_valid
 
 
 def create_perspectives(arr: np.ndarray, args) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
