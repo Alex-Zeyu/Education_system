@@ -23,6 +23,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.8, help='Control the contribution of inter and intra loss.')
     parser.add_argument('--tau', type=float, default=0.05, help='Temperature parameter.')
     parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
+    parser.add_argument('--nlp_lr', type=float, default=1e-3, help='Initial NLP learning rate.')
     parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
@@ -39,16 +40,43 @@ if __name__ == '__main__':
     graph_data = GraphData(answer_path, question_path)
     print(graph_data)  # print some information
 
+    # edge index with sign
+    g = graph_data.get_undirected_edge_index_with_sign().to(device)
+
     # GAT contrastive model
     seed_everything(args.seed)
     model = GAT_CL(args, device).to(device)
-    model_state_dict = model.state_dict()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
-    x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)  # random embeddings
-    g = graph_data.get_undirected_edge_index_with_sign().to(device)  # edge index with sign
+    # user random embeddings
+    usr_emb = torch.randn(size=(graph_data.usr_num, args.emb_size)).to(device)
+    # load NLP embedding for questions
+    nlp_emb_path = os.path.join('embedding', f'{args.dataset}_roberta_base.pt')
+    if os.path.exists(nlp_emb_path):
+        qus_emb_raw = torch.load(nlp_emb_path)
+    else:
+        import sys
+        sys.path.append('src/pre_train_model')
+        from src.pre_train_model.embedding import load_dataset, clean_html
+        from flair.embeddings import TransformerDocumentEmbeddings
+        from flair.data import Sentence
 
-    seeds = generate_random_seeds(args.rounds, args.seed)  # used for train-test split
+        qus_x = load_dataset(graph_data.get_question_df(), None).astype(str)  # np.ndarray
+        qus_sent_arr = [Sentence(clean_html(' '.join(row))) for row in qus_x]  # Sentence array
+        # use pretrained NLP model
+        nlp_model = TransformerDocumentEmbeddings('roberta-base')
+        for s in qus_sent_arr:
+            nlp_model.embed(s)
+        qus_emb_raw = torch.cat([s.embedding.unsqueeze(0) for s in qus_sent_arr], dim=0)  # raw question embeddings
+        torch.save(qus_emb_raw, nlp_emb_path)
+
+    # transform the NLP output
+    nlp_emb_size = 768
+    nlp_transform = torch.nn.Linear(nlp_emb_size, args.emb_size, bias=False).to(device)
+    nlp_trans_optimizer = torch.optim.Adam(nlp_transform.parameters(), lr=args.nlp_lr, weight_decay=5e-4)
+
+    # used for train-test split
+    seeds = generate_random_seeds(args.rounds, args.seed)
 
 
     @torch.no_grad()
@@ -68,11 +96,13 @@ if __name__ == '__main__':
 
 
     def run(round_i: int):
-        model.load_state_dict(model_state_dict)  # reset parameters
+        model.reset_parameters()
+        nlp_transform.reset_parameters()
 
         # train-test split
         seed_everything(seeds[round_i])
-        g_train, g_test = split_edges_undirected(g, args.test_ratio)  # edge index with signs
+        # edge index with signs
+        g_train, g_test = split_edges_undirected(g, args.test_ratio)
 
         # graph augmentation
         # generate augmentation mask
@@ -97,6 +127,11 @@ if __name__ == '__main__':
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
+            nlp_transform.train()
+
+            qus_emb = nlp_transform(qus_emb_raw)
+            qus_emb = torch.relu(qus_emb)
+            x = torch.cat([usr_emb, qus_emb], dim=0)
             emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg = model(x, edge_index_g1_pos, edge_index_g2_pos,
                                                                    edge_index_g1_neg, edge_index_g2_neg)
             # contrastive loss
@@ -107,11 +142,14 @@ if __name__ == '__main__':
             loss = args.beta * loss_contrastive + loss_label
 
             optimizer.zero_grad()
+            nlp_trans_optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            nlp_trans_optimizer.step()
 
             # model evaluation
             model.eval()
+            nlp_transform.eval()
             temp_res = {}
             with torch.no_grad():
                 z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
@@ -130,5 +168,5 @@ if __name__ == '__main__':
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gat_cl_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', 'gat_cl_roberta_' + args.dataset + '.pkl')
     save_as_df(results, save_path)

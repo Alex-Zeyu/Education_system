@@ -37,15 +37,16 @@ class GraphData:
         self.data = self.data.to_numpy()
         self.data[:, 1] += self.usr_num  # add offset to question id
 
-    def summary(self) -> None:
+    def __repr__(self) -> str:
         """Print some information about the data"""
-        print('\nData Summary:')
-        print(f'number of nodes: {self.usr_num + self.qus_num}')
-        print(f'number of users: {self.usr_num}')
-        print(f'number of questions: {self.qus_num}')
-        print(f'number of edges: {len(self.data)}')
-        print(f'number of positive edges: {(self.data[:, 2] == 1).sum()}')
-        print(f'number of negative edges: {(self.data[:, 2] == -1).sum()}\n')
+        return ('Data Summary: \n'
+                f'number of nodes: {self.usr_num + self.qus_num}\n'
+                f'number of users: {self.usr_num}\n'
+                f'number of questions: {self.qus_num}\n'
+                f'number of edges: {len(self.data)}\n'
+                f'number of positive edges: {(self.data[:, 2] == 1).sum()}\n'
+                f'number of negative edges: {(self.data[:, 2] == -1).sum()}\n'
+                )
 
     def get_balance_score(self, show: bool = False) -> float:
         import networkx as nx
@@ -73,6 +74,20 @@ class GraphData:
         qus_valid = self.ans[['QuestionID']].merge(self.qus, on='QuestionID')
         qus_valid = qus_valid.drop_duplicates(subset=['QuestionID']).sort_values(by=['QuestionID'], ignore_index=True)
         return qus_valid
+
+    def get_undirected_edge_index_with_sign(self) -> torch.Tensor:
+        return torch.from_numpy(np.concatenate((self.data[:, [0, 1, 2]], self.data[:, [1, 0, 2]]), axis=0)).T
+
+
+def split_edges_undirected(edge_index: torch.Tensor, test_ratio: float = 0.2) -> tuple[torch.Tensor, torch.Tensor]:
+    mask = torch.ones(edge_index.size(1) // 2, dtype=torch.bool)  # number of undirected edges
+    mask[torch.randperm(mask.size(0))[:int(test_ratio * mask.size(0))]] = 0
+    mask = torch.cat([mask, mask], dim=0)
+
+    train_edge_index = edge_index[:, mask]
+    test_edge_index = edge_index[:, ~mask]
+
+    return train_edge_index, test_edge_index
 
 
 def create_perspectives(arr: np.ndarray, args) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

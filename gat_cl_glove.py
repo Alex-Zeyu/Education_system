@@ -6,7 +6,7 @@ if __name__ == '__main__':
     from sklearn.metrics import roc_auc_score, f1_score
     from torch_geometric import seed_everything
     from src.signed_graph_model.model import GAT_CL
-    from utils.graph_data import GraphData, generate_random_seeds, split_edges
+    from utils.graph_data import GraphData, generate_random_seeds, split_edges_undirected
     from utils.results import save_as_df
     import argparse
 
@@ -38,10 +38,10 @@ if __name__ == '__main__':
     answer_path = os.path.join(dataset_path, 'Answers_CourseX.xlsx')
     question_path = os.path.join(dataset_path, 'Questions_CourseX.xlsx')
     graph_data = GraphData(answer_path, question_path)
-    graph_data.summary()  # print some information
+    print(graph_data)  # print some information
 
     # edge index with sign
-    g = torch.from_numpy(graph_data.data.copy().T).to(device)
+    g = graph_data.get_undirected_edge_index_with_sign().to(device)
 
     # GAT contrastive model
     seed_everything(args.seed)
@@ -51,28 +51,28 @@ if __name__ == '__main__':
     # user random embeddings
     usr_emb = torch.randn(size=(graph_data.usr_num, args.emb_size)).to(device)
     # load NLP embedding for questions
-    nlp_emb_path = os.path.join('embedding', f'{args.dataset}_roberta_base.pt')
+    nlp_emb_path = os.path.join('embedding', f'{args.dataset}_glove.pt')
     if os.path.exists(nlp_emb_path):
         qus_emb_raw = torch.load(nlp_emb_path)
     else:
         import sys
         sys.path.append('src/pre_train_model')
         from src.pre_train_model.embedding import load_dataset, clean_html
-        from flair.embeddings import TransformerDocumentEmbeddings
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings
         from flair.data import Sentence
 
         qus_x = load_dataset(graph_data.get_question_df(), None).astype(str)  # np.ndarray
         qus_text_arr = [clean_html(' '.join(row)) for row in qus_x]  # string array
         qus_sent_arr = [Sentence(s) for s in qus_text_arr]  # Sentence array
         # use pretrained NLP model
-        nlp_model = TransformerDocumentEmbeddings('roberta-base')
+        nlp_model = DocumentPoolEmbeddings([WordEmbeddings('glove')], fine_tune_mode='none')
         for s in qus_sent_arr:
             nlp_model.embed(s)
         qus_emb_raw = torch.cat([s.embedding.unsqueeze(0) for s in qus_sent_arr], dim=0)  # raw question embeddings
         torch.save(qus_emb_raw, nlp_emb_path)
 
     # transform the NLP output
-    nlp_emb_size = 768
+    nlp_emb_size = 100
     nlp_transform = torch.nn.Linear(nlp_emb_size, args.emb_size, bias=False).to(device)
     nlp_trans_optimizer = torch.optim.Adam(nlp_transform.parameters(), lr=args.nlp_lr, weight_decay=5e-4)
 
@@ -103,15 +103,15 @@ if __name__ == '__main__':
         # train-test split
         seed_everything(seeds[round_i])
         # edge index with signs
-        g_train, g_test = split_edges(g, args.test_ratio)
+        g_train, g_test = split_edges_undirected(g, args.test_ratio)
 
         # graph augmentation
         # generate augmentation mask
         mask1 = torch.ones(g_train.size(1), dtype=torch.bool)
-        mask1[torch.randperm(mask1.size(0))[:int(args.test_ratio * mask1.size(0))]] = 0
+        mask1[torch.randperm(mask1.size(0))[:int(args.mask_ratio * mask1.size(0))]] = 0
 
         mask2 = torch.ones(g_train.size(1), dtype=torch.bool)
-        mask2[torch.randperm(mask2.size(0))[:int(args.test_ratio * mask2.size(0))]] = 0
+        mask2[torch.randperm(mask2.size(0))[:int(args.mask_ratio * mask2.size(0))]] = 0
 
         g1 = g_train[:, mask1]  # delete edges
         g2 = g_train.detach().clone()  # flip signs
@@ -153,7 +153,12 @@ if __name__ == '__main__':
             nlp_transform.eval()
             temp_res = {}
             with torch.no_grad():
-                y_score_test = model.predict_edges(model.norm_embs, g_test[0], g_test[1])
+                z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
+                z = [torch.nn.functional.normalize(emb, p=2, dim=1) for emb in z]
+                z = model.linear_combine(torch.cat(z, dim=-1))
+                z = torch.nn.functional.normalize(z, p=2, dim=1)
+
+                y_score_test = model.predict_edges(z, g_test[0], g_test[1])
                 temp_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
             if temp_res['test_auc'] + temp_res['test_f1'] > best_res['test_auc'] + best_res['test_f1']:
                 best_res = temp_res
@@ -164,5 +169,5 @@ if __name__ == '__main__':
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gat_cl_nlp_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', 'gat_cl_glove_' + args.dataset + '.pkl')
     save_as_df(results, save_path)

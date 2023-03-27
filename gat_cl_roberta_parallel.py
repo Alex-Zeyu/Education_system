@@ -16,8 +16,6 @@ if __name__ == '__main__':
     parser.add_argument('--emb_size', type=int, default=64, help='Embedding dimension for each node.')
     parser.add_argument('--num_layers', type=int, default=1, help='Number of GNN (implemented by pyg) layers.')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout parameter.')
-    parser.add_argument('--linear_predictor_layers', type=int, default=1,
-                        help='Number of MLP layers (0-4) to make prediction from learned embeddings.')
     parser.add_argument('--mask_ratio', type=float, default=0.1, help='Random mask ratio')
     parser.add_argument('--beta', type=float, default=5e-4, help='Control contribution of loss contrastive.')
     parser.add_argument('--alpha', type=float, default=0.8, help='Control the contribution of inter and intra loss.')
@@ -45,8 +43,38 @@ if __name__ == '__main__':
     model_state_dict = model.state_dict()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
-    x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)  # random embeddings
-    g = graph_data.get_undirected_edge_index_with_sign().to(device)  # edge index with sign
+    # random embeddings
+    x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+    # QUESTION EMBEDDINGS
+    nlp_emb_path = os.path.join('embedding', f'{args.dataset}_roberta_base.pt')
+    if os.path.exists(nlp_emb_path):
+        qus_emb_raw = torch.load(nlp_emb_path)
+    else:
+        import sys
+        sys.path.append('src/pre_train_model')
+        from src.pre_train_model.embedding import load_dataset, clean_html
+        from flair.embeddings import TransformerDocumentEmbeddings
+        from flair.data import Sentence
+
+        qus_x = load_dataset(graph_data.get_question_df(), None).astype(str)  # np.ndarray
+        qus_sent_arr = [Sentence(clean_html(' '.join(row))) for row in qus_x]  # Sentence array
+        # use pretrained NLP model
+        nlp_model = TransformerDocumentEmbeddings('roberta-base')
+        for s in qus_sent_arr:
+            nlp_model.embed(s)
+        qus_emb_raw = torch.cat([s.embedding.unsqueeze(0) for s in qus_sent_arr], dim=0)  # raw question embeddings
+        torch.save(qus_emb_raw, nlp_emb_path)
+    nlp_emb_size = 768
+    nlp_combine = torch.nn.Sequential(
+        torch.nn.Linear(args.emb_size * 2 + nlp_emb_size, args.emb_size),
+        torch.nn.ReLU(),
+        torch.nn.Linear(args.emb_size, 1)
+    ).to(device)
+    nlp_state_dict = nlp_combine.state_dict()
+    nlp_optimizer = torch.optim.Adam(nlp_combine.parameters(), lr=args.lr, weight_decay=5e-4)
+
+    # edge index with sign
+    g = graph_data.get_undirected_edge_index_with_sign().to(device)
 
     seeds = generate_random_seeds(args.rounds, args.seed)  # used for train-test split
 
@@ -66,9 +94,18 @@ if __name__ == '__main__':
         }
         return res
 
+    def predict_edges(mlp, emb, usr_qus_id, qus_usr_id, qus_nlp_emb):
+        emb_usr_qus = emb[usr_qus_id]
+        emb_qus_usr = emb[qus_usr_id]
+        qid = torch.where(usr_qus_id > qus_usr_id, usr_qus_id, qus_usr_id)
+        qid -= qid.min()
+        emb_nlp = qus_nlp_emb[qid]
+        x = torch.cat([emb_usr_qus, emb_qus_usr, emb_nlp], dim=-1)
+        return mlp(x).flatten()
 
     def run(round_i: int):
         model.load_state_dict(model_state_dict)  # reset parameters
+        nlp_combine.load_state_dict(nlp_state_dict)
 
         # train-test split
         seed_everything(seeds[round_i])
@@ -97,21 +134,26 @@ if __name__ == '__main__':
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
+            nlp_combine.train()
+
             emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg = model(x, edge_index_g1_pos, edge_index_g2_pos,
                                                                    edge_index_g1_neg, edge_index_g2_neg)
             # contrastive loss
             loss_contrastive = model.compute_contrastive_loss(emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg)
-            y_score = model.predict_edges(model.norm_embs, g_train[0], g_train[1])
+            y_score = predict_edges(nlp_combine, model.norm_embs, g_train[0], g_train[1], qus_emb_raw)
             loss_label = model.compute_label_loss(y_score, (g_train[2] == 1).float())
 
             loss = args.beta * loss_contrastive + loss_label
 
             optimizer.zero_grad()
+            nlp_optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            nlp_optimizer.step()
 
             # model evaluation
             model.eval()
+            nlp_combine.eval()
             temp_res = {}
             with torch.no_grad():
                 z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
@@ -119,7 +161,7 @@ if __name__ == '__main__':
                 z = model.linear_combine(torch.cat(z, dim=-1))
                 z = torch.nn.functional.normalize(z, p=2, dim=1)
 
-                y_score_test = model.predict_edges(z, g_test[0], g_test[1])
+                y_score_test = predict_edges(nlp_combine, z, g_test[0], g_test[1], qus_emb_raw)
                 temp_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
             if temp_res['test_auc'] + temp_res['test_f1'] > best_res['test_auc'] + best_res['test_f1']:
                 best_res = temp_res
@@ -130,5 +172,5 @@ if __name__ == '__main__':
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gat_cl_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', 'gat_cl_roberta_p_' + args.dataset + '.pkl')
     save_as_df(results, save_path)

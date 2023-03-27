@@ -5,7 +5,7 @@ if __name__ == '__main__':
     from tqdm import tqdm
     from torch_geometric import seed_everything
     from torch_geometric.nn import SignedGCN
-    from utils.graph_data import GraphData, generate_random_seeds
+    from utils.graph_data import GraphData, generate_random_seeds, split_edges_undirected
     from utils.results import save_as_df
     import argparse
 
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     graph_data.summary()  # print some information
 
     # edge index
-    edge_index = torch.from_numpy(graph_data.data.copy().T).to(device)
+    edge_index = graph_data.get_undirected_edge_index_with_sign().to(device)
     pos_edge_index = edge_index[0:2, edge_index[2] > 0]  # positive edge index
     neg_edge_index = edge_index[0:2, edge_index[2] < 0]  # negative edge index
 
@@ -82,8 +82,8 @@ if __name__ == '__main__':
 
         # train-test split
         seed_everything(seeds[round_i])
-        train_pos_edge_index, test_pos_edge_index = model.split_edges(pos_edge_index, args.train_test_ratio)
-        train_neg_edge_index, test_neg_edge_index = model.split_edges(neg_edge_index, args.train_test_ratio)
+        train_pos_edge_index, test_pos_edge_index = split_edges_undirected(pos_edge_index, args.train_test_ratio)
+        train_neg_edge_index, test_neg_edge_index = split_edges_undirected(neg_edge_index, args.train_test_ratio)
 
         # user and question embeddings (can't learn stuff)
         x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
