@@ -1,5 +1,6 @@
 if __name__ == '__main__':
     import os
+    import copy
     import torch
     import numpy as np
     from tqdm import tqdm
@@ -43,7 +44,7 @@ if __name__ == '__main__':
     # GAT contrastive model
     seed_everything(args.seed)
     model = GAT_CL(args, device).to(device)
-    model_state_dict = model.state_dict()
+    model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
     x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)  # random embeddings
