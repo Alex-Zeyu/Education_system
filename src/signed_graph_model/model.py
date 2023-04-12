@@ -12,7 +12,7 @@ class GAT_CL(torch.nn.Module):
         self.device = device
         self.emb_size = args.emb_size
         self.num_layers = args.num_layers
-        self.norm_embs = None   # normalized embeddings
+        self.norm_embs = None  # normalized embeddings
 
         self.layer_ab_pos = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
         self.layer_ab_neg = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
@@ -20,8 +20,6 @@ class GAT_CL(torch.nn.Module):
         self.activation = torch.nn.PReLU()
         self.dropout = torch.nn.Dropout(p=args.dropout)
         self.link_mlp = LinkMLP(args)  # make prediction
-
-        self.reset_parameters()
 
     def forward(self, x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg):
         emb_g1_pos = x
@@ -72,46 +70,103 @@ class GAT_CL(torch.nn.Module):
 
     def compute_contrastive_loss(self, emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg):
         nodes_num, feature_size = emb_g1_pos.shape
-        emb_g1_pos, emb_g2_pos = emb_g1_pos.to(self.device), emb_g2_pos.to(self.device)
-        emb_g1_neg, emb_g2_neg = emb_g1_neg.to(self.device), emb_g2_neg.to(self.device)
 
-        def inter_contrastive(emb_1, emb_2):
-            pos_score = torch.div(torch.bmm(emb_1.view(nodes_num, 1, feature_size),
-                                            emb_2.view(nodes_num, feature_size, 1)),
-                                  self.args.tau).exp()
-            neg_sim = torch.mm(emb_1, emb_2.transpose(0, 1)).fill_diagonal_(0)
-            neg_score = torch.div(neg_sim, self.args.tau).exp().sum(dim=1)
-            return (-(torch.div(pos_score, neg_score).log())).mean()
+        emb_g1_pos = emb_g1_pos.to(self.device)
+        emb_g2_pos = emb_g2_pos.to(self.device)
+        emb_g1_neg = emb_g1_neg.to(self.device)
+        emb_g2_neg = emb_g2_neg.to(self.device)
 
-        def intra_contrastive(self_embs, embs_g1_pos, embs_g1_neg, embs_g2_pos, embs_g2_neg):
-            pos_score_1 = torch.exp(torch.div(torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_g1_pos.view(nodes_num, feature_size, 1)), self.args.tau))
-            pos_score_2 = torch.exp(torch.div(torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_g2_pos.view(nodes_num, feature_size, 1)), self.args.tau))
+        norm_emb_g1_pos = F.normalize(emb_g1_pos, p=2, dim=1)
+        norm_emb_g2_pos = F.normalize(emb_g2_pos, p=2, dim=1)
+        norm_emb_g1_neg = F.normalize(emb_g1_neg, p=2, dim=1)
+        norm_emb_g2_neg = F.normalize(emb_g2_neg, p=2, dim=1)
+
+        def inter_contrastive(embs_attr, embs_stru):
+            pos = torch.exp(torch.div(
+                torch.bmm(embs_attr.view(nodes_num, 1, feature_size), embs_stru.view(nodes_num, feature_size, 1)),
+                self.args.tau))
+
+            def generate_neg_score(emb_1, emb_2):
+                neg_similarity = torch.mm(emb_1.view(nodes_num, feature_size), emb_2.transpose(0, 1)).fill_diagonal_(0)
+                return torch.sum(torch.exp(torch.div(neg_similarity, self.args.tau)), dim=1)
+
+            neg = generate_neg_score(embs_attr, embs_stru)
+
+            return torch.mean(- (torch.log(torch.div(pos, neg))))
+
+        def intra_contrastive(self_embs, embs_attr_pos, embs_attr_neg, embs_stru_pos, embs_stru_neg):
+            pos_score_1 = torch.exp(torch.div(
+                torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_attr_pos.view(nodes_num, feature_size, 1)),
+                self.args.tau))
+            pos_score_2 = torch.exp(torch.div(
+                torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_stru_pos.view(nodes_num, feature_size, 1)),
+                self.args.tau))
             pos = pos_score_1 + pos_score_2
 
             def generate_neg_score(pos_embs, neg_embs_1, neg_embs_2):
-                neg_score_1 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size), neg_embs_1.view(nodes_num, feature_size, 1))
-                neg_score_2 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size), neg_embs_2.view(nodes_num, feature_size, 1))
-                return torch.exp(torch.div(neg_score_1, self.args.tau)) + torch.exp(torch.div(neg_score_2, self.args.tau))
+                neg_score_1 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size),
+                                        neg_embs_1.view(nodes_num, feature_size, 1))
+                neg_score_2 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size),
+                                        neg_embs_2.view(nodes_num, feature_size, 1))
+                return torch.exp(torch.div(neg_score_1, self.args.tau)) + torch.exp(
+                    torch.div(neg_score_2, self.args.tau))
 
-            neg = generate_neg_score(self_embs, embs_g1_neg, embs_g2_neg)
-            return torch.mean(-torch.log(torch.div(pos, neg)))
+            neg = generate_neg_score(self_embs, embs_attr_neg, embs_stru_neg)
+            return torch.mean(- torch.log(torch.div(pos, neg)))
 
-        emb_g1_pos = F.normalize(emb_g1_pos, p=2, dim=1)  # normalize the embeddings (l2)
-        emb_g2_pos = F.normalize(emb_g2_pos, p=2, dim=1)
-        emb_g1_neg = F.normalize(emb_g1_neg, p=2, dim=1)
-        emb_g2_neg = F.normalize(emb_g2_neg, p=2, dim=1)
+        inter_pos = inter_contrastive(norm_emb_g1_pos, norm_emb_g2_pos)
+        inter_neg = inter_contrastive(norm_emb_g1_neg, norm_emb_g2_neg)
 
-        emb = self.linear_combine(torch.cat([emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg], dim=-1))
-        emb = F.normalize(emb, p=2, dim=1)
-        self.norm_embs = emb  # store the normalized embeddings
+        emb = torch.cat((emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg), dim=-1)
+        self.embs = self.linear_combine(emb)
+        self.norm_embs = F.normalize(self.embs, p=2, dim=1)
 
-        # inter loss
-        inter_pos = inter_contrastive(emb_g1_pos, emb_g2_pos)
-        inter_neg = inter_contrastive(emb_g1_neg, emb_g2_neg)
-
-        # intra loss
-        intra = intra_contrastive(emb, emb_g1_pos, emb_g1_neg, emb_g2_pos, emb_g2_neg)
+        intra = intra_contrastive(self.norm_embs, norm_emb_g1_pos, norm_emb_g1_neg,
+                                  norm_emb_g2_pos, norm_emb_g2_neg)
         return (1 - self.args.alpha) * (inter_pos + inter_neg) + self.args.alpha * intra
+
+    # def compute_contrastive_loss(self, emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg):
+    #     nodes_num, feature_size = emb_g1_pos.shape
+    #     emb_g1_pos, emb_g2_pos = emb_g1_pos.to(self.device), emb_g2_pos.to(self.device)
+    #     emb_g1_neg, emb_g2_neg = emb_g1_neg.to(self.device), emb_g2_neg.to(self.device)
+    #
+    #     def inter_contrastive(emb_1, emb_2):
+    #         pos_score = torch.exp(torch.div(torch.bmm(emb_1.view(nodes_num, 1, feature_size),
+    #                                         emb_2.view(nodes_num, feature_size, 1)),
+    #                               self.args.tau))
+    #         neg_sim = torch.mm(emb_1, emb_2.transpose(0, 1)).fill_diagonal_(0)
+    #         neg_score = torch.exp(torch.div(neg_sim, self.args.tau)).sum(dim=1)
+    #         return torch.mean(- (torch.log(torch.div(pos_score, neg_score))))
+    #
+    #     def intra_contrastive(self_embs, embs_g1_pos, embs_g1_neg, embs_g2_pos, embs_g2_neg):
+    #         pos_score_1 = torch.exp(torch.div(torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_g1_pos.view(nodes_num, feature_size, 1)), self.args.tau))
+    #         pos_score_2 = torch.exp(torch.div(torch.bmm(self_embs.view(nodes_num, 1, feature_size), embs_g2_pos.view(nodes_num, feature_size, 1)), self.args.tau))
+    #         pos = pos_score_1 + pos_score_2
+    #
+    #         def generate_neg_score(pos_embs, neg_embs_1, neg_embs_2):
+    #             neg_score_1 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size), neg_embs_1.view(nodes_num, feature_size, 1))
+    #             neg_score_2 = torch.bmm(pos_embs.view(nodes_num, 1, feature_size), neg_embs_2.view(nodes_num, feature_size, 1))
+    #             return torch.exp(torch.div(neg_score_1, self.args.tau)) + torch.exp(torch.div(neg_score_2, self.args.tau))
+    #
+    #         neg = generate_neg_score(self_embs, embs_g1_neg, embs_g2_neg)
+    #         return torch.mean(-torch.log(torch.div(pos, neg)))
+    #
+    #     emb_g1_pos = F.normalize(emb_g1_pos, p=2, dim=1)  # normalize the embeddings (l2)
+    #     emb_g2_pos = F.normalize(emb_g2_pos, p=2, dim=1)
+    #     emb_g1_neg = F.normalize(emb_g1_neg, p=2, dim=1)
+    #     emb_g2_neg = F.normalize(emb_g2_neg, p=2, dim=1)
+    #
+    #     emb = self.linear_combine(torch.cat([emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg], dim=-1))
+    #     emb = F.normalize(emb, p=2, dim=1)
+    #     self.norm_embs = emb  # store the normalized embeddings
+    #
+    #     # inter loss
+    #     inter_pos = inter_contrastive(emb_g1_pos, emb_g2_pos)
+    #     inter_neg = inter_contrastive(emb_g1_neg, emb_g2_neg)
+    #
+    #     # intra loss
+    #     intra = intra_contrastive(emb, emb_g1_pos, emb_g1_neg, emb_g2_pos, emb_g2_neg)
+    #     return (1 - self.args.alpha) * (inter_pos + inter_neg) + self.args.alpha * intra
 
 
 class SGNNEnc(torch.nn.Module):
@@ -283,8 +338,6 @@ class LinkMLP(torch.nn.Module):
                 torch.nn.Linear(args.emb_size, 1))
         else:
             raise Exception("Invalid layer number.")
-        
-        self.reset_parameters()
 
     def forward(self, v_user: torch.Tensor, v_qust: torch.Tensor):
         if self.args.linear_predictor_layers == 0:  # dot product
