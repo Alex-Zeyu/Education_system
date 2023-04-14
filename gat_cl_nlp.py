@@ -160,5 +160,5 @@ if __name__ == '__main__':
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gat_cl_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', f'gat_cl_{args.nlp_method}' + args.dataset + '.pkl')
     save_as_df(results, save_path)

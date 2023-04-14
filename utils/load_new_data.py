@@ -1,22 +1,27 @@
 import numpy as np
 import pandas as pd
 
+"""
+The new datasets are: Sydney, Sydney_AdditionalLTISet and Cardiff, the Sydney_AdditionalLTISet dataset is too small 
+(3532 edges for the largest course) thus is ignored.
+Here we use the largest course in Sydney dataset (course_id: 23146 response=1), and smallest 2 courses in Cardiff 
+dataset (course_id: 20102, 20188, response=1)
+"""
+
 
 def load_csv(path: str) -> pd.DataFrame:
-    def get_title(path: str) -> list[str]:
+    def get_title() -> list[str]:
         with open(path) as f:
             f.readline()
-            title = f.readline().split("|")
-            title = list(filter(None, list(map(str.strip, title))))  # strip the title and remove empty element
-            return title
+            t = f.readline().split("|")
+            return list(filter(None, list(map(str.strip, t))))  # strip the title and remove empty element
 
-    title = get_title(path)
+    title = get_title()
     n_cols = len(title)
 
     df = pd.read_csv(path, sep="|", usecols=range(1, n_cols + 1), header=0, names=title, dtype=object,
                      encoding="unicode-escape")
-    # drop the line seperator (e.g. +--------+)
-    df.drop([0, 1, df.shape[0] - 1], axis=0, inplace=True)
+    df.drop([0, 1, df.shape[0] - 1], axis=0, inplace=True)  # drop the line seperator (e.g. +--------+)
     df.reset_index(drop=True, inplace=True)
     return df
 
@@ -28,15 +33,14 @@ def load_answer(path: str):
         'answer': str,
         'course_id': np.int64
     }
-    answer = load_csv(path)[['user', 'question_id', 'answer', 'course_id']].astype(type_dict)
-    answer['answer'] = answer['answer'].str.strip()
-    return answer
+    answer_df = load_csv(path)[['user', 'question_id', 'answer', 'course_id']].astype(type_dict)
+    answer_df['answer'] = answer_df['answer'].str.strip()
+    return answer_df
 
 
 def load_question(path: str, responses: int):
     type_dict = {
         'id': np.int64,
-        'course_id': np.int64,
         'avg_rating': np.float64,
         'total_responses': np.int64,
         'total_ratings': np.int64,
@@ -51,50 +55,56 @@ def load_question(path: str, responses: int):
         'altD': str,
         'altE': str
     }
-    question = load_csv(path).drop(columns=['timestamp', 'user', 'top_rating_count', 'total_comments']).astype(
-        type_dict)
-    # ignore any questions that are edited
-    question = question[(question['deleted'] == 0) & (question['total_responses'] >= responses)].drop(
-        columns=['deleted'])
-    question.reset_index(drop=True, inplace=True)
-    question['answer'] = question['answer'].str.strip()
-    question.rename(columns={'id': 'question_id'}, inplace=True)
+    question_df = load_csv(path)
+    question_df = question_df[~question_df['id'].isna()]  # filter the NA rows
+    question_df = question_df.drop(
+        columns=['timestamp', 'user', 'top_rating_count', 'total_comments', 'course_id']).astype(type_dict)
+    # ignore any hidden questions
+    question_df = question_df[(question_df['deleted'] == 0) & (question_df['total_responses'] >= responses)].drop(
+        columns=['deleted']).reset_index(drop=True)
+    question_df['answer'] = question_df['answer'].str.strip()
+    question_df.rename(columns={'id': 'question_id'}, inplace=True)
 
-    return question
+    return question_df
 
 
-def get_merged(answer_df, question_df):
-    merged = answer_df.merge(question_df, on=['question_id'])
-    merged['sign'] = np.where(merged['answer_x'] == merged['answer_y'], 1, -1)
-    merged.drop(columns=['answer_x', 'answer_y', 'course_id_x', 'course_id_y'], inplace=True)
+def get_merged(answer_df, question_df, course_id=None, suffix=''):
+    merged_df = answer_df.merge(question_df, on=['question_id'])
+    merged_df['sign'] = np.where(merged_df['answer_x'] == merged_df['answer_y'], 1, -1)
+    merged_df.drop(columns=['answer_x', 'answer_y'], inplace=True)
 
-    data_info = {
-        'user_num': merged['user'].nunique(),
-        'ques_num': merged['question_id'].nunique(),
-        'edge_num': merged.shape[0],
-        'pos_edge': (merged['sign'] > 0).sum(),
-        'neg_edge': (merged['sign'] < 0).sum()
+    # subset data according to course_id
+    if course_id:
+        merged_df = merged_df[merged_df['course_id'] == course_id]
+        merged_df.reset_index(drop=True, inplace=True)
+
+    info = {
+        'user_num': merged_df['user'].nunique(),
+        'ques_num': merged_df['question_id'].nunique(),
+        'edge_num': merged_df.shape[0],
+        'pos_edge': (merged_df['sign'] > 0).sum(),
+        'neg_edge': (merged_df['sign'] < 0).sum()
     }
 
     # save dictionary
     import pickle
-    save_path = os.path.join('..', 'datasets', 'processed', args.dataset)
+    save_path = os.path.join('..', 'datasets', 'processed', f'{args.dataset}{suffix}')
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     with open(os.path.join(save_path, 'data_info.pkl'), 'wb') as f:
-        pickle.dump(data_info, f)
+        pickle.dump(info, f)
 
     # reindex user and question id
     from sklearn.preprocessing import LabelEncoder
     user_encoder = LabelEncoder()
     ques_encoder = LabelEncoder()
-    merged['user'] = user_encoder.fit_transform(merged['user'])
-    merged['question_id'] = ques_encoder.fit_transform(merged['question_id']) + data_info['user_num']
+    merged_df['user'] = user_encoder.fit_transform(merged_df['user'])
+    merged_df['question_id'] = ques_encoder.fit_transform(merged_df['question_id']) + info['user_num']
 
-    return merged, data_info
+    return merged_df, info
 
 
-def save_edge_index(df: pd.DataFrame, args):
+def save_edge_index(df: pd.DataFrame, args, suffix=''):
     import os
     import torch
     import random
@@ -107,13 +117,13 @@ def save_edge_index(df: pd.DataFrame, args):
 
     # generate mask for splitting
     def generate_mask():
-        mask = torch.ones(df.shape[0], dtype=torch.bool)
-        mask[torch.randperm(mask.size(0))[:int(args.test_ratio * mask.size(0))]] = 0
-        return mask
+        m = torch.ones(df.shape[0], dtype=torch.bool)
+        m[torch.randperm(m.size(0))[:int(args.test_ratio * m.size(0))]] = 0
+        return m
 
     # save edge index as local files
     edge_index = torch.tensor(df[['user', 'question_id', 'sign']].values)
-    path = os.path.join('..', 'datasets', 'processed', args.dataset)
+    path = os.path.join('..', 'datasets', 'processed', f'{args.dataset}{suffix}')  # folder path
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -131,7 +141,7 @@ def save_edge_index(df: pd.DataFrame, args):
         torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
 
 
-def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None):
+def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None, suffix: str = ''):
     import os
     import torch
     if os.path.exists(path):
@@ -147,7 +157,7 @@ def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None):
         qus_valid = qus_valid[nlp_cols].values.astype(str)
 
         # path to save embeddings
-        save_path = os.path.join('..', 'embedding', args.dataset)
+        save_path = os.path.join('..', 'embedding', f'{args.dataset}{suffix}')  # folder path
         if not os.path.exists(save_path):
             os.makedirs(save_path)
 
@@ -192,8 +202,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--splits', type=int, default=2, help='How many times to split the dataset.')
     parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
-    parser.add_argument('--dataset', type=str, default='Sydney_AdditionalLTISet', help='The dataset to be used.')
-    parser.add_argument('--responses', type=int, default=20,
+    parser.add_argument('--dataset', type=str, default='Sydney', help='The dataset to be used.')
+    parser.add_argument('--responses', type=int, default=1,
                         help='Only keep the questions with responses >= certain number')
     args = parser.parse_args()
     print(args)
@@ -203,5 +213,21 @@ if __name__ == '__main__':
     question_path = os.path.join('..', 'datasets', 'Sydney_Cardiff_PW_Data', args.dataset, 'All_Questions.txt')
 
     answer, question = load_answer(answer_path), load_question(question_path, args.responses)
-    merged, data_info = get_merged(answer, question)
-    # _ = load_nlp_emb("none", merged, "glove")
+    # if args.dataset == 'Sydney':
+    #     merged, data_info = get_merged(answer, question, course_id=23146)
+    #     save_edge_index(merged, args)
+    #     load_nlp_emb('none', merged, 'glove')
+    #     load_nlp_emb('none', merged, 'roberta')
+    # elif args.dataset == 'Cardiff':
+    #     merged0, data_info0 = get_merged(answer, question, course_id=20102, suffix='0')
+    #     merged1, data_info1 = get_merged(answer, question, course_id=20188, suffix='1')
+    #     save_edge_index(merged0, args, suffix='0')
+    #     save_edge_index(merged1, args, suffix='1')
+    #     # glove embedding
+    #     load_nlp_emb('none', merged0, 'glove', suffix='0')
+    #     load_nlp_emb('none', merged1, 'glove', suffix='1')
+    #     # roberta embedding
+    #     load_nlp_emb('none', merged0, 'roberta', suffix='0')
+    #     load_nlp_emb('none', merged1, 'roberta', suffix='1')
+    # else:
+    #     raise Exception('Invalid dataset.')
