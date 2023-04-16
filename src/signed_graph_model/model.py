@@ -12,7 +12,6 @@ class GAT_CL(torch.nn.Module):
         self.device = device
         self.emb_size = args.emb_size
         self.num_layers = args.num_layers
-        self.norm_embs = None  # normalized embeddings
 
         self.layer_ab_pos = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
         self.layer_ab_neg = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
