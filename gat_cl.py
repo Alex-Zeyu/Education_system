@@ -15,11 +15,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
-    parser.add_argument('--emb_size', type=int, default=64, help='Embedding dimension for each node.')
+    parser.add_argument('--emb_size', type=int, default=32, help='Embedding dimension for each node.')
+    parser.add_argument('--num_layers', type=int, default=1, help='Number of GNN (implemented by pyg) layers.')
+    parser.add_argument('--dropout', type=float, default=0, help='Dropout parameter.')
     parser.add_argument('--linear_predictor_layers', type=int, default=1, choices=range(5),
-                        help='Number of MLP layers (0-4) to make prediction from learned embeddings.')
-    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout parameter.')
-    parser.add_argument('--linear_predictor_layers', type=int, default=1,
                         help='Number of MLP layers (0-4) to make prediction from learned embeddings.')
     parser.add_argument('--mask_ratio', type=float, default=0.1, help='Random mask ratio')
     parser.add_argument('--beta', type=float, default=5e-4, help='Control contribution of loss contrastive.')
