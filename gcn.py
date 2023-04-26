@@ -1,8 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import scipy.sparse
-from torch_geometric.utils import negative_sampling, structured_negative_sampling, coalesce
+from torch_geometric.utils import negative_sampling, structured_negative_sampling
 from torch_geometric.nn import GCNConv
 
 
@@ -30,44 +29,6 @@ class GCN(torch.nn.Module):
         for conv in self.convs:
             conv.reset_parameters()
         self.lin.reset_parameters()
-
-    def create_spectral_features(self, pos_edge_index, neg_edge_index, num_nodes=None):
-        r"""Creates :obj:`in_channels` spectral node features based on
-        positive and negative edges.
-
-        Args:
-            pos_edge_index (LongTensor): The positive edge indices.
-            neg_edge_index (LongTensor): The negative edge indices.
-            num_nodes (int, optional): The number of nodes, *i.e.*
-                :obj:`max_val + 1` of :attr:`pos_edge_index` and
-                :attr:`neg_edge_index`. (default: :obj:`None`)
-        """
-        from sklearn.decomposition import TruncatedSVD
-
-        edge_index = torch.cat([pos_edge_index, neg_edge_index], dim=1)
-        N = edge_index.max().item() + 1 if num_nodes is None else num_nodes
-        edge_index = edge_index.to(torch.device('cpu'))
-
-        pos_val = torch.full((pos_edge_index.size(1),), 2, dtype=torch.float)
-        neg_val = torch.full((neg_edge_index.size(1),), 0, dtype=torch.float)
-        val = torch.cat([pos_val, neg_val], dim=0)
-
-        row, col = edge_index
-        edge_index = torch.cat([edge_index, torch.stack([col, row])], dim=1)
-        val = torch.cat([val, val], dim=0)
-
-        edge_index, val = coalesce(edge_index, val, num_nodes=N)
-        val = val - 1
-
-        # Borrowed from:
-        # https://github.com/benedekrozemberczki/SGCN/blob/master/src/utils.py
-        edge_index = edge_index.detach().numpy()
-        val = val.detach().numpy()
-        A = scipy.sparse.coo_matrix((val, edge_index), shape=(N, N))
-        svd = TruncatedSVD(n_components=self.em_dim, n_iter=128)
-        svd.fit(A)
-        x = svd.components_.T
-        return torch.from_numpy(x).to(torch.float).to(pos_edge_index.device)
 
     def discriminate(self, z, edge_index):
         """
@@ -145,7 +106,7 @@ class GCN(torch.nn.Module):
         loss_2 = self.neg_embedding_loss(z, neg_edge_index)
         return nll_loss + self.lamb * (loss_1 + loss_2)
 
-    def test(self, z: torch.Tensor, pos_edge_index, neg_edge_index, epoch) -> dict:
+    def test(self, z: torch.Tensor, pos_edge_index, neg_edge_index, epoch, mode='test') -> dict:
         """Evaluates node embeddings :obj:`z` on positive and negative test
         edges by computing AUC and F1 scores.
 
@@ -166,77 +127,84 @@ class GCN(torch.nn.Module):
         pred, y = pred.numpy(), y.numpy()
 
         res = {
-            'test_epoch': epoch,
-            'test_pos_ratio': np.sum(y) / len(y),
-            'test_auc': roc_auc_score(y, pred),
-            'test_f1': f1_score(y, pred) if pred.sum() > 0 else 0,
-            'test_macro_f1': f1_score(y, pred, average='macro') if pred.sum() > 0 else 0,
-            'test_micro_f1': f1_score(y, pred, average='micro') if pred.sum() > 0 else 0
+            f'{mode}_epoch': epoch,
+            f'{mode}_pos_ratio': np.sum(y) / len(y),
+            f'{mode}_auc': roc_auc_score(y, pred),
+            f'{mode}_f1': f1_score(y, pred) if pred.sum() > 0 else 0,
+            f'{mode}_macro_f1': f1_score(y, pred, average='macro') if pred.sum() > 0 else 0,
+            f'{mode}_micro_f1': f1_score(y, pred, average='micro') if pred.sum() > 0 else 0
         }
         return res
 
 
 if __name__ == '__main__':
     import os
+    import pickle
+    import copy
     from tqdm import tqdm
-    from utils.graph_data import GraphData, generate_random_seeds, split_edges
     from utils.results import save_as_df
     from torch_geometric import seed_everything
+    from utils.load_old_data import load_edge_index
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
-    parser.add_argument('--emb_size', type=int, default=64, help='Embedding dimension for each node.')
-    parser.add_argument('--num_layers', type=int, default=2, help='Number of SignedGCN (implemented by pyg) layers.')
-    parser.add_argument('--lr', type=float, default=0.01)
-    parser.add_argument('--train_test_ratio', type=float, default=0.2, help='Split the training and test set.')
-    parser.add_argument('--epochs', type=int, default=200, help='Number of epochs.')
+    parser.add_argument('--emb_size', type=int, default=32, help='Embedding dimension for each node.')
+    parser.add_argument('--num_layers', type=int, default=1, help='Number of GNN layers.')
+    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
+    parser.add_argument('--early_stop_steps', type=int, default=10, help='Early stopping.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
-    parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
+    parser.add_argument('--rounds', type=int, default=2, help='Repeating the training and evaluation process.')
 
     args = parser.parse_args()
     print(args)
 
     # init settings
     device = 'cuda' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
-    dataset_path = os.path.join('datasets', 'PeerWiseData', args.dataset)
-    answer_path = os.path.join(dataset_path, 'Answers_CourseX.xlsx')
-    question_path = os.path.join(dataset_path, 'Questions_CourseX.xlsx')
-    graph_data = GraphData(answer_path, question_path)
-    graph_data.summary()  # print some information
 
-    # edge index
-    edge_index = torch.from_numpy(graph_data.data.copy().T).to(device)
-    pos_edge_index = edge_index[0:2, edge_index[2] > 0]  # positive edge index
-    neg_edge_index = edge_index[0:2, edge_index[2] < 0]  # negative edge index
+    # data information
+    with open(os.path.join('datasets', 'processed', args.dataset, 'data_info.pkl'), 'rb') as f:
+        data_info = pickle.load(f)
 
     seed_everything(args.seed)
     model = GCN(args).to(device)
+    model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
-    # used for train-test split
-    seeds = generate_random_seeds(args.rounds, args.seed)
+    x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)  # random embeddings
 
 
     def run(round_i: int):
-        model.reset_parameters()
-        # train-test split
-        seed_everything(seeds[round_i])
-        train_pos_edge_index, test_pos_edge_index = split_edges(pos_edge_index, args.train_test_ratio)
-        train_neg_edge_index, test_neg_edge_index = split_edges(neg_edge_index, args.train_test_ratio)
+        model.load_state_dict(model_state_dict)
 
-        # generate user and question embeddings
-        # x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)
-        x = torch.randn(size=(graph_data.usr_num + graph_data.qus_num, args.emb_size)).to(device)
+        # load train-test dataset
+        g_train = load_edge_index(args.dataset, train=True, round=round_i).to(device)
+        g_test = load_edge_index(args.dataset, train=False, round=round_i).to(device)
 
-        best_res = {'test_auc': 0, 'test_f1': 0}
+        train_pos_edge_index, train_neg_edge_index = g_train[0:2, g_train[2] > 0], g_train[0:2, g_train[2] < 0]
+        test_pos_edge_index, test_neg_edge_index = g_test[0:2, g_test[2] > 0], g_test[0:2, g_test[2] < 0]
+
+        # train the model
+        best_res = {'train_auc': 0, 'train_f1': 0}
+        best_loss, early_stop_cnt = np.Inf, 0
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
             optimizer.zero_grad()
             z = model(x, train_pos_edge_index, train_neg_edge_index)
             loss = model.loss(z, train_pos_edge_index, train_neg_edge_index)
+
+            # early stopping
+            if loss < best_loss:
+                best_loss = loss
+                early_stop_cnt = 0
+            else:
+                early_stop_cnt += 1
+            if early_stop_cnt > args.early_stop_steps:
+                break
+
             loss.backward()
             optimizer.step()
 
@@ -245,8 +213,9 @@ if __name__ == '__main__':
             temp_res = {}
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
+                temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='train'))
                 temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch))
-            if temp_res['test_auc'] + temp_res['test_f1'] > best_res['test_auc'] + best_res['test_f1']:
+            if temp_res['train_auc'] + temp_res['train_f1'] > best_res['train_auc'] + best_res['train_f1']:
                 best_res = temp_res
 
         print(f'Round {round_i} done.')
@@ -256,5 +225,5 @@ if __name__ == '__main__':
     results = [run(i) for i in range(args.rounds)]
 
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gcn_baseline_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', f'gcn_baseline_{args.dataset}.pkl')
     save_as_df(results, save_path)
