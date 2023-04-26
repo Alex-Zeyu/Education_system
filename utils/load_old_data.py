@@ -145,9 +145,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
-    parser.add_argument('--splits', type=int, default=2, help='How many times to split the dataset.')
+    parser.add_argument('--splits', type=int, default=10, help='How many times to split the dataset.')
     parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
-    parser.add_argument('--dataset', type=str, default='Law', help='The dataset to be used.')
+    parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
     args = parser.parse_args()
     print(args)
 
@@ -156,4 +156,5 @@ if __name__ == "__main__":
     question_path = os.path.join('..', 'datasets', 'PeerWiseData', args.dataset, 'Questions_CourseX.xlsx')
 
     answer, question, merged, data_info = load_csv(answer_path, question_path)
+    # save_edge_index(merged, args)
     # load_nlp_emb("none", merged, "glove")

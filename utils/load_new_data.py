@@ -200,7 +200,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
-    parser.add_argument('--splits', type=int, default=2, help='How many times to split the dataset.')
+    parser.add_argument('--splits', type=int, default=10, help='How many times to split the dataset.')
     parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
     parser.add_argument('--dataset', type=str, default='Sydney', help='The dataset to be used.')
     parser.add_argument('--responses', type=int, default=1,

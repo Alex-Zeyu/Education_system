@@ -213,8 +213,8 @@ if __name__ == '__main__':
             temp_res = {}
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
-                temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='train'))
-                temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch))
+                temp_res.update(model.test(z, train_pos_edge_index, train_neg_edge_index, epoch, mode='train'))
+                temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
             if temp_res['train_auc'] + temp_res['train_f1'] > best_res['train_auc'] + best_res['train_f1']:
                 best_res = temp_res
 
