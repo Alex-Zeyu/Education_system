@@ -18,7 +18,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', type=int, default=1, help='Number of SignedGCN (implemented by pyg) layers.')
     parser.add_argument('--lr', type=float, default=1e-2, help='Initial learning rate.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
-    parser.add_argument('--early_stop_steps', type=int, default=10, help='Early stopping.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
     parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
 
@@ -83,7 +82,6 @@ if __name__ == '__main__':
 
         # train the model
         best_res = {'train_auc': 0, 'train_f1': 0}
-        best_loss, early_stop_cnt = np.Inf, 0
 
         # train the model
         for epoch in tqdm(range(args.epochs)):
@@ -91,16 +89,6 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             z = model(x, train_pos_edge_index, train_neg_edge_index)
             loss = model.loss(z, train_pos_edge_index, train_neg_edge_index)
-
-            # early stopping
-            if loss < best_loss:
-                best_loss = loss
-                early_stop_cnt = 0
-            else:
-                early_stop_cnt += 1
-            if early_stop_cnt > args.early_stop_steps:
-                break
-
             loss.backward()
             optimizer.step()
 
