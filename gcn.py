@@ -152,10 +152,10 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--emb_size', type=int, default=32, help='Embedding dimension for each node.')
     parser.add_argument('--num_layers', type=int, default=1, help='Number of GNN layers.')
-    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--lr', type=float, default=5e-3)
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
-    parser.add_argument('--rounds', type=int, default=2, help='Repeating the training and evaluation process.')
+    parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
 
     args = parser.parse_args()
     print(args)
@@ -186,7 +186,7 @@ if __name__ == '__main__':
         test_pos_edge_index, test_neg_edge_index = g_test[0:2, g_test[2] > 0], g_test[0:2, g_test[2] < 0]
 
         # train the model
-        best_res = {'train_auc': 0, 'train_f1': 0}
+        lowest_loss, best_res = np.Inf, {}
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
@@ -195,16 +195,13 @@ if __name__ == '__main__':
             loss = model.loss(z, train_pos_edge_index, train_neg_edge_index)
             loss.backward()
             optimizer.step()
-
-            # evaluate the model
-            model.eval()
-            temp_res = {}
-            with torch.no_grad():
-                z = model(x, train_pos_edge_index, train_neg_edge_index)
-                temp_res.update(model.test(z, train_pos_edge_index, train_neg_edge_index, epoch, mode='train'))
-                temp_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
-            if temp_res['train_auc'] + temp_res['train_f1'] > best_res['train_auc'] + best_res['train_f1']:
-                best_res = temp_res
+            if loss < lowest_loss:
+                lowest_loss = loss
+                model.eval()  # evaluate the model
+                with torch.no_grad():
+                    z = model(x, train_pos_edge_index, train_neg_edge_index)
+                best_res.update(model.test(z, train_pos_edge_index, train_neg_edge_index, epoch, mode='train'))
+                best_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 
         print(f'Round {round_i} done.')
         return best_res
