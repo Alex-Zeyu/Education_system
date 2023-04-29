@@ -24,12 +24,10 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=5e-4, help='Control contribution of loss contrastive.')
     parser.add_argument('--alpha', type=float, default=0.8, help='Control the contribution of inter and intra loss.')
     parser.add_argument('--tau', type=float, default=0.05, help='Temperature parameter.')
-    parser.add_argument('--lr', type=float, default=5e-3, help='Initial learning rate.')
-    parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Initial learning rate.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
-    parser.add_argument('--early_stop_steps', type=int, default=10, help='Early stopping.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
-    parser.add_argument('--rounds', type=int, default=2, help='Repeating the training and evaluation process.')
+    parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
 
     args = parser.parse_args()
     print(args)
@@ -92,11 +90,11 @@ if __name__ == '__main__':
         edge_index_g2_neg = g2[0:2, g2[2] < 0]
 
         # train the model
-        best_res = {'train_auc': 0, 'train_f1': 0}
-        best_loss, early_stop_cnt = np.Inf, 0
+        lowest_loss, best_res = np.Inf, {}
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
+            optimizer.zero_grad()
             emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg = model(x, edge_index_g1_pos, edge_index_g2_pos,
                                                                    edge_index_g1_neg, edge_index_g2_neg)
             # contrastive loss
@@ -104,39 +102,27 @@ if __name__ == '__main__':
             y_score = model.predict_edges(model.norm_embs, g_train[0], g_train[1])
             loss_label = model.compute_label_loss(y_score, (g_train[2] == 1).float())
             loss = args.beta * loss_contrastive + loss_label
-
-            # early stopping
-            if loss < best_loss:
-                best_loss = loss
-                early_stop_cnt = 0
-            else:
-                early_stop_cnt += 1
-            if early_stop_cnt >= args.early_stop_steps:
-                break
-
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # model evaluation
-            model.eval()
-            temp_res = {}
-            with torch.no_grad():
-                z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
-                z = model.linear_combine(torch.cat(z, dim=-1))
-                z = torch.nn.functional.normalize(z, p=2, dim=1)
+            if loss < lowest_loss:
+                lowest_loss = loss
+                # model evaluation
+                model.eval()
+                with torch.no_grad():
+                    z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
+                    z = model.linear_combine(torch.cat(z, dim=-1))
+                    z = torch.nn.functional.normalize(z, p=2, dim=1)
 
-                y_score_train = model.predict_edges(z, g_train[0], g_train[1])
-                y_score_test = model.predict_edges(z, g_test[0], g_test[1])
-                temp_res.update(test_and_val(y_score_train, (g_train[2] == 1).float(), mode='train', epoch=epoch))
-                temp_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
-            if temp_res['train_auc'] + temp_res['train_f1'] > best_res['train_auc'] + best_res['train_f1']:
-                best_res = temp_res
+                    y_score_train = model.predict_edges(z, g_train[0], g_train[1])
+                    y_score_test = model.predict_edges(z, g_test[0], g_test[1])
+                best_res.update(test_and_val(y_score_train, (g_train[2] == 1).float(), mode='train', epoch=epoch))
+                best_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
+
         print(f'Round {round_i} done.')
         return best_res
 
-
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', 'gat_cl_' + args.dataset + '.pkl')
+    save_path = os.path.join('results', f'gat_cl_{args.dataset}_{args.emb_size}.pkl')
     save_as_df(results, save_path)

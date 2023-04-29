@@ -16,7 +16,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--emb_size', type=int, default=32, help='Embedding dimension for each node.')
     parser.add_argument('--num_layers', type=int, default=1, help='Number of SignedGCN (implemented by pyg) layers.')
-    parser.add_argument('--lr', type=float, default=5e-3, help='Initial learning rate.')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Initial learning rate.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
     parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
@@ -107,5 +107,5 @@ if __name__ == '__main__':
     results = [run(i) for i in range(args.rounds)]
 
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', f'sgcn_baseline_{args.dataset}.pkl')
+    save_path = os.path.join('results', f'sgcn_{args.dataset}_{args.emb_size}.pkl')
     save_as_df(results, save_path)
