@@ -1,13 +1,13 @@
 if __name__ == '__main__':
     import os
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import copy
     import torch
     import numpy as np
     from tqdm import tqdm
-    from sklearn.metrics import roc_auc_score, f1_score
     from torch_geometric import seed_everything
     from src.signed_graph_model.model import GAT_CL
-    from utils.results import save_as_df
+    from utils.results import test_and_val, save_as_df
     from utils.load_old_data import load_edge_index
     import pickle
     import argparse
@@ -19,21 +19,20 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', type=int, default=1, help='Number of GNN (implemented by pyg) layers.')
     parser.add_argument('--dropout', type=float, default=0, help='Dropout parameter.')
     parser.add_argument('--linear_predictor_layers', type=int, default=1, choices=range(5),
-                        help='Number of MLP layers (0-4) to make prediction from learned embeddings.')
+                        help='Number of MLP layers (0-4) to make prediction from learned embeddings. (not used if '
+                             'nlp_parallel set True)')
     parser.add_argument('--mask_ratio', type=float, default=0.1, help='Random mask ratio')
     parser.add_argument('--beta', type=float, default=5e-4, help='Control contribution of loss contrastive.')
     parser.add_argument('--alpha', type=float, default=0.8, help='Control the contribution of inter and intra loss.')
     parser.add_argument('--tau', type=float, default=0.05, help='Temperature parameter.')
-    parser.add_argument('--lr', type=float, default=5e-3, help='Initial learning rate.')
-    parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Initial learning rate.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
-    parser.add_argument('--early_stop_steps', type=int, default=10, help='Early stopping.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
-    parser.add_argument('--rounds', type=int, default=2, help='Repeating the training and evaluation process.')
+    parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
     # NLP settings
     parser.add_argument('--nlp_method', type=str, default='glove', choices=['glove', 'roberta'],
                         help='NLP embedding method.')
-    parser.add_argument('--nlp_lr', type=float, default=1e-4, help='Initial NLP learning rate.')
+    parser.add_argument('--nlp_lr', type=float, default=1e-3, help='Initial NLP learning rate.')
     parser.add_argument('--nlp_parallel', type=bool, default=False,
                         help='Combine the nlp embedding and graph embedding at the MLP stage.')
     args = parser.parse_args()
@@ -41,6 +40,7 @@ if __name__ == '__main__':
 
     # init settings
     device = 'cuda' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
+    torch.use_deterministic_algorithms(True)
 
     # data information
     with open(os.path.join('datasets', 'processed', args.dataset, 'data_info.pkl'), 'rb') as f:
@@ -54,24 +54,20 @@ if __name__ == '__main__':
 
     # question embedding
     nlp_emb_size = 100 if args.nlp_method == 'glove' else 768
-    # embeddings
-    if args.nlp_parallel:
-        x_all = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
-    else:
-        x_user = torch.randn(size=(data_info['user_num'], args.emb_size)).to(device)  # user random embeddings
-    # NLP embedding for questions
-    x_ques_raw = torch.load(os.path.join('embedding', args.dataset, f'{args.nlp_method}.pt')).to(device)
 
-    # transform the NLP output
     if args.nlp_parallel:
+        # user and question embeddings
+        x_all = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
+        # predict based on learned embedding and semantic question embedding
         nlp_mlp = torch.nn.Sequential(
             torch.nn.Linear(2 * args.emb_size + nlp_emb_size, 2 * args.emb_size),
-            torch.nn.Dropout(p=.3),
+            torch.nn.Dropout(p=.5),
             torch.nn.ReLU(),
             torch.nn.Linear(2 * args.emb_size, 1)
         ).to(device)
         mlp_state_dict = copy.deepcopy(nlp_mlp.state_dict())
         mlp_optimizer = torch.optim.Adam(nlp_mlp.parameters(), lr=args.nlp_lr)
+
 
         def predict_edges_with_nlp(mlp, all_emb, edge_index, ques_nlp_emb):
             emb_1, emb2 = all_emb[edge_index[0]], all_emb[edge_index[1]]
@@ -79,27 +75,15 @@ if __name__ == '__main__':
             qid -= qid.min()
             x = torch.cat([emb_1, emb2, ques_nlp_emb[qid]], dim=-1)
             return mlp(x).flatten()
-
     else:
+        # user random embeddings
+        x_user = torch.randn(size=(data_info['user_num'], args.emb_size)).to(device)
+        # transform the input of the GNN model
         nlp_transform = torch.nn.Linear(nlp_emb_size, args.emb_size, bias=False).to(device)
         nlp_state_dict = copy.deepcopy(nlp_transform.state_dict())
         nlp_optimizer = torch.optim.Adam(nlp_transform.parameters(), lr=args.nlp_lr)
-
-
-    @torch.no_grad()
-    def test_and_val(y_score, y, mode='test', epoch=0):
-        y_score = y_score.cpu().numpy()
-        y = y.cpu().numpy()
-        y_pred = np.where(y_score >= .5, 1, 0)
-        res = {
-            f'{mode}_epoch': epoch,
-            f'{mode}_pos_ratio': np.sum(y) / len(y),
-            f'{mode}_auc': roc_auc_score(y, y_pred),
-            f'{mode}_f1': f1_score(y, y_pred),
-            f'{mode}_macro_f1': f1_score(y, y_pred, average='macro'),
-            f'{mode}_micro_f1': f1_score(y, y_pred, average='micro')
-        }
-        return res
+    #  question semantic embeddings
+    x_ques_raw = torch.load(os.path.join('embedding', args.dataset, f'{args.nlp_method}.pt')).to(device)
 
 
     def run(round_i: int):
@@ -132,14 +116,19 @@ if __name__ == '__main__':
         edge_index_g2_neg = g2[0:2, g2[2] < 0]
 
         # train the model
-        best_res = {'train_auc': 0, 'train_f1': 0}
-        best_loss, early_stop_cnt = np.Inf, 0
+        lowest_loss, best_res = np.Inf, {}
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
-            nlp_mlp.train() if args.nlp_parallel else nlp_transform.train()
-
-            x = x_all if args.nlp_parallel else torch.cat([x_user, nlp_transform(x_ques_raw)], dim=0)
+            optimizer.zero_grad()
+            if args.nlp_parallel:
+                nlp_mlp.train()
+                mlp_optimizer.zero_grad()
+                x = x_all
+            else:
+                nlp_transform.train()
+                nlp_optimizer.zero_grad()
+                x = torch.cat([x_user, nlp_transform(x_ques_raw)], dim=0)
             emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg = model(x, edge_index_g1_pos, edge_index_g2_pos,
                                                                    edge_index_g1_neg, edge_index_g2_neg)
             # contrastive loss
@@ -150,47 +139,40 @@ if __name__ == '__main__':
                 y_score = model.predict_edges(model.norm_embs, g_train[0], g_train[1])
             loss_label = model.compute_label_loss(y_score, (g_train[2] == 1).float())
             loss = args.beta * loss_contrastive + loss_label
-
-            # early stopping
-            if loss < best_loss:
-                best_loss = loss
-                early_stop_cnt = 0
-            else:
-                early_stop_cnt += 1
-            if early_stop_cnt >= args.early_stop_steps:
-                break
-
-            optimizer.zero_grad()
-            mlp_optimizer.zero_grad() if args.nlp_parallel else nlp_optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             mlp_optimizer.step() if args.nlp_parallel else nlp_optimizer.step()
 
-            # model evaluation
-            model.eval()
-            nlp_mlp.eval() if args.nlp_parallel else nlp_transform.eval()
-            temp_res = {}
-            with torch.no_grad():
-                x = x_all if args.nlp_parallel else torch.cat([x_user, nlp_transform(x_ques_raw)], dim=0)
-                z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
-                z = model.linear_combine(torch.cat(z, dim=-1))
-                z = torch.nn.functional.normalize(z, p=2, dim=1)
-
+            if loss < lowest_loss:
+                lowest_loss = loss
+                # model evaluation
+                model.eval()
                 if args.nlp_parallel:
-                    y_score_train = predict_edges_with_nlp(nlp_mlp, z, g_train, x_ques_raw)
-                    y_score_test = predict_edges_with_nlp(nlp_mlp, z, g_test, x_ques_raw)
+                    nlp_mlp.eval()
                 else:
-                    y_score_train = model.predict_edges(z, g_train[0], g_train[1])
-                    y_score_test = model.predict_edges(z, g_test[0], g_test[1])
-                temp_res.update(test_and_val(y_score_train, (g_train[2] == 1).float(), mode='train', epoch=epoch))
-                temp_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
-            if temp_res['train_auc'] + temp_res['train_f1'] > best_res['train_auc'] + best_res['train_f1']:
-                best_res = temp_res
+                    nlp_transform.eval()
+
+                with torch.no_grad():
+                    x = x_all if args.nlp_parallel else torch.cat([x_user, nlp_transform(x_ques_raw)], dim=0)
+                    z = model(x, edge_index_g1_pos, edge_index_g2_pos, edge_index_g1_neg, edge_index_g2_neg)
+                    z = model.linear_combine(torch.cat(z, dim=-1))
+                    z = torch.nn.functional.normalize(z, p=2, dim=1)
+
+                    if args.nlp_parallel:
+                        y_score_train = predict_edges_with_nlp(nlp_mlp, z, g_train, x_ques_raw)
+                        y_score_test = predict_edges_with_nlp(nlp_mlp, z, g_test, x_ques_raw)
+                    else:
+                        y_score_train = model.predict_edges(z, g_train[0], g_train[1])
+                        y_score_test = model.predict_edges(z, g_test[0], g_test[1])
+                best_res.update(test_and_val(y_score_train, (g_train[2] == 1).float(), mode='train', epoch=epoch))
+                best_res.update(test_and_val(y_score_test, (g_test[2] == 1).float(), mode='test', epoch=epoch))
+
         print(f'Round {round_i} done.')
         return best_res
 
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
-    save_path = os.path.join('results', f'gat_cl_{args.nlp_method}_' + args.dataset + '.pkl')
+    flag = 'p' if args.nlp_parallel else ''
+    save_path = os.path.join('results', f'gat_cl_{args.nlp_method}_{args.dataset}_{args.emb_size}_{flag}.pkl')
     save_as_df(results, save_path)

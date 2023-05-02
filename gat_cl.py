@@ -1,13 +1,13 @@
 if __name__ == '__main__':
     import os
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import copy
     import torch
     import numpy as np
     from tqdm import tqdm
-    from sklearn.metrics import roc_auc_score, f1_score
     from torch_geometric import seed_everything
     from src.signed_graph_model.model import GAT_CL
-    from utils.results import save_as_df
+    from utils.results import test_and_val, save_as_df
     from utils.load_old_data import load_edge_index
     import pickle
     import argparse
@@ -34,6 +34,7 @@ if __name__ == '__main__':
 
     # init settings
     device = 'cuda' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
+    torch.use_deterministic_algorithms(True)
 
     # data information
     with open(os.path.join('datasets', 'processed', args.dataset, 'data_info.pkl'), 'rb') as f:
@@ -46,22 +47,6 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
     x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)  # random embeddings
-
-
-    @torch.no_grad()
-    def test_and_val(y_score, y, mode='test', epoch=0):
-        y_score = y_score.cpu().numpy()
-        y = y.cpu().numpy()
-        y_pred = np.where(y_score >= .5, 1, 0)
-        res = {
-            f'{mode}_epoch': epoch,
-            f'{mode}_pos_ratio': np.sum(y) / len(y),
-            f'{mode}_auc': roc_auc_score(y, y_pred),
-            f'{mode}_f1': f1_score(y, y_pred),
-            f'{mode}_macro_f1': f1_score(y, y_pred, average='macro'),
-            f'{mode}_micro_f1': f1_score(y, y_pred, average='micro')
-        }
-        return res
 
 
     def run(round_i: int):
@@ -121,6 +106,7 @@ if __name__ == '__main__':
 
         print(f'Round {round_i} done.')
         return best_res
+
 
     results = [run(i) for i in range(args.rounds)]
     # save the results as a pandas DataFrame
