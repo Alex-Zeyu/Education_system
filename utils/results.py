@@ -20,8 +20,17 @@ def test_and_val(y_score, y, mode='test', epoch=0):
     return res
 
 
-def save_as_df(dict_list, path: str, show=True) -> None:
-    df = pd.DataFrame.from_dict(dict_list).round(3)  # create dataframe
+def save_as_df(dict_list, path: str, show=True, append=False) -> None:
+    import os
+    if not os.path.exists(path):
+        append = False
+        print('file not exists, set append to False.')
+
+    if append:
+        df = pd.read_pickle(path)
+        df = pd.concat([df, pd.DataFrame.from_dict(dict_list).round(3)], axis=0)
+    else:
+        df = pd.DataFrame.from_dict(dict_list).round(3)  # create dataframe
     df.to_pickle(path)  # save file
     if show:
         print(df)
