@@ -14,9 +14,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
-    parser.add_argument('--emb_size', type=int, default=32, help='Embedding dimension for each node.')
-    parser.add_argument('--num_layers', type=int, default=1, help='Number of SignedGCN (implemented by pyg) layers.')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Initial learning rate.')
+    parser.add_argument('--emb_size', type=int, default=64, help='Embedding dimension for each node.')
+    parser.add_argument('--num_layers', type=int, default=2, help='Number of SignedGCN layers.')
+    parser.add_argument('--lr', type=float, default=1e-2, help='Initial learning rate.')
     parser.add_argument('--epochs', type=int, default=300, help='Number of epochs.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
     parser.add_argument('--rounds', type=int, default=1, help='Repeating the training and evaluation process.')
@@ -36,8 +36,6 @@ if __name__ == '__main__':
     model = SignedGCN(args.emb_size, args.emb_size, num_layers=args.num_layers, lamb=5).to(device)
     model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
-
-    x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)  # random embeddings
 
 
     def test(model: SignedGCN, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor,
@@ -80,6 +78,8 @@ if __name__ == '__main__':
         g_test = load_edge_index(args.dataset, train=False, round=round_i).to(device)
         train_pos_edge_index, train_neg_edge_index = g_train[0:2, g_train[2] > 0], g_train[0:2, g_train[2] < 0]
         test_pos_edge_index, test_neg_edge_index = g_test[0:2, g_test[2] > 0], g_test[0:2, g_test[2] < 0]
+
+        x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)  # embeddings
 
         # train the model
         lowest_loss, best_res = np.Inf, {}
