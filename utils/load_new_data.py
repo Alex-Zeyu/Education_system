@@ -134,11 +134,14 @@ def save_edge_index(df: pd.DataFrame, args, suffix=''):
         test_ei = edge_index[~mask]
 
         # undirected graph
-        train_ei = torch.cat([train_ei[:, [0, 1, 2]], train_ei[:, [1, 0, 2]]], dim=0).T
-        test_ei = torch.cat([test_ei[:, [0, 1, 2]], test_ei[:, [1, 0, 2]]], dim=0).T
+        # train_ei = torch.cat([train_ei[:, [0, 1, 2]], train_ei[:, [1, 0, 2]]], dim=0).T
+        # test_ei = torch.cat([test_ei[:, [0, 1, 2]], test_ei[:, [1, 0, 2]]], dim=0).T
+        # torch.save(train_ei, os.path.join(path, f'train_{split_i}.pt'))
+        # torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
 
-        torch.save(train_ei, os.path.join(path, f'train_{split_i}.pt'))
-        torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
+        # directed graph
+        torch.save(train_ei.T, os.path.join(path, f'train_{split_i}.pt'))
+        torch.save(test_ei.T, os.path.join(path, f'test_{split_i}.pt'))
 
 
 def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None, suffix: str = ''):
@@ -202,7 +205,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--splits', type=int, default=10, help='How many times to split the dataset.')
     parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
-    parser.add_argument('--dataset', type=str, default='Sydney', help='The dataset to be used.')
+    parser.add_argument('--dataset', type=str, default='Sydney', choices=['Sydney', 'Cardiff'],
+                        help='The dataset to be used.')
     parser.add_argument('--responses', type=int, default=1,
                         help='Only keep the questions with responses >= certain number')
     args = parser.parse_args()
@@ -229,5 +233,3 @@ if __name__ == '__main__':
     #     # roberta embedding
     #     load_nlp_emb('none', merged0, 'roberta', suffix='0')
     #     load_nlp_emb('none', merged1, 'roberta', suffix='1')
-    # else:
-    #     raise Exception('Invalid dataset.')

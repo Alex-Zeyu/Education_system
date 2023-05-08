@@ -68,11 +68,14 @@ def save_edge_index(df: pd.DataFrame, args):
         test_ei = edge_index[~mask]
 
         # undirected graph
-        train_ei = torch.cat([train_ei[:, [0, 1, 2]], train_ei[:, [1, 0, 2]]], dim=0).T
-        test_ei = torch.cat([test_ei[:, [0, 1, 2]], test_ei[:, [1, 0, 2]]], dim=0).T
+        # train_ei = torch.cat([train_ei[:, [0, 1, 2]], train_ei[:, [1, 0, 2]]], dim=0).T
+        # test_ei = torch.cat([test_ei[:, [0, 1, 2]], test_ei[:, [1, 0, 2]]], dim=0).T
+        # torch.save(train_ei, os.path.join(path, f'train_{split_i}.pt'))
+        # torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
 
-        torch.save(train_ei, os.path.join(path, f'train_{split_i}.pt'))
-        torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
+        # directed graph
+        torch.save(train_ei.T, os.path.join(path, f'train_{split_i}.pt'))
+        torch.save(test_ei.T, os.path.join(path, f'test_{split_i}.pt'))
 
 
 def load_edge_index(dataset: str, train: bool, round: int):
