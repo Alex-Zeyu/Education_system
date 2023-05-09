@@ -49,12 +49,6 @@ def save_edge_index(df: pd.DataFrame, args):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
-    # generate mask for splitting
-    def generate_mask():
-        mask = torch.ones(df.shape[0], dtype=torch.bool)
-        mask[torch.randperm(mask.size(0))[:int(args.test_ratio * mask.size(0))]] = 0
-        return mask
-
     # save edge index as local files
     edge_index = torch.tensor(df[['UserID', 'QuestionID', 'Sign']].values)
     path = os.path.join('..', 'datasets', 'processed', args.dataset)
@@ -62,20 +56,17 @@ def save_edge_index(df: pd.DataFrame, args):
         os.makedirs(path)
 
     for split_i in range(args.splits):
-        mask = generate_mask()
+        # generate mask
+        train_idx, val_idx, test_idx = torch.utils.data.random_split(range(edge_index.size(0)), [.85, .05, .1])
+        train_idx, val_idx, test_idx = torch.tensor(train_idx), torch.tensor(val_idx), torch.tensor(test_idx)
 
-        train_ei = edge_index[mask]
-        test_ei = edge_index[~mask]
-
-        # undirected graph
-        # train_ei = torch.cat([train_ei[:, [0, 1, 2]], train_ei[:, [1, 0, 2]]], dim=0).T
-        # test_ei = torch.cat([test_ei[:, [0, 1, 2]], test_ei[:, [1, 0, 2]]], dim=0).T
-        # torch.save(train_ei, os.path.join(path, f'train_{split_i}.pt'))
-        # torch.save(test_ei, os.path.join(path, f'test_{split_i}.pt'))
+        train_edge_index, val_edge_index, test_edge_index = edge_index[train_idx], edge_index[val_idx], edge_index[
+            test_idx]
 
         # directed graph
-        torch.save(train_ei.T, os.path.join(path, f'train_{split_i}.pt'))
-        torch.save(test_ei.T, os.path.join(path, f'test_{split_i}.pt'))
+        torch.save(train_edge_index.t(), os.path.join(path, f'train_{split_i}.pt'))
+        torch.save(val_edge_index.t(), os.path.join(path, f'val_{split_i}.pt'))
+        torch.save(test_edge_index.t(), os.path.join(path, f'test_{split_i}.pt'))
 
 
 def load_edge_index(dataset: str, train: bool, round: int):
@@ -149,7 +140,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--splits', type=int, default=10, help='How many times to split the dataset.')
-    parser.add_argument('--test_ratio', type=float, default=0.2, help='Split the training and test set.')
     parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
     args = parser.parse_args()
     print(args)
