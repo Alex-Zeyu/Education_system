@@ -191,6 +191,7 @@ def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None, suffix:
 if __name__ == '__main__':
     import os
     import argparse
+    import torch
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
@@ -209,12 +210,15 @@ if __name__ == '__main__':
     answer, question = load_answer(answer_path), load_question(question_path, args.responses)
     # if args.dataset == 'Sydney':
     #     merged, data_info = get_merged(answer, question, course_id=23146)
+    #     edge_index = torch.tensor(merged[['user', 'question_id', 'sign']].values)
     #     save_edge_index(merged, args)
     #     load_nlp_emb('none', merged, 'glove')
     #     load_nlp_emb('none', merged, 'roberta')
     # elif args.dataset == 'Cardiff':
     #     merged0, data_info0 = get_merged(answer, question, course_id=20102, suffix='0')
     #     merged1, data_info1 = get_merged(answer, question, course_id=20188, suffix='1')
+    #     edge_index0 = torch.tensor(merged0[['user', 'question_id', 'sign']].values)
+    #     edge_index1 = torch.tensor(merged1[['user', 'question_id', 'sign']].values)
     #     save_edge_index(merged0, args, suffix='0')
     #     save_edge_index(merged1, args, suffix='1')
     #     # glove embedding

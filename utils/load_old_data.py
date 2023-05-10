@@ -69,12 +69,63 @@ def save_edge_index(df: pd.DataFrame, args):
         torch.save(test_edge_index.t(), os.path.join(path, f'test_{split_i}.pt'))
 
 
-def load_edge_index(dataset: str, train: bool, round: int):
-    """invoke in the root directory"""
+def butterfly_info(edge_index_with_sign):
+    import networkx as nx
+
+    sign_dict = {}
+    G = nx.Graph()
+    for src, dst, sign in edge_index_with_sign.numpy():
+        sign_dict[(src, dst)] = sign
+        sign_dict[(dst, src)] = sign
+        G.add_edge(src, dst)
+    circles = nx.cycle_basis(G)
+    butterflies = [circle for circle in circles if len(circle) == 4]
+    # balanced butterflies
+    bbf = [b for b in butterflies if
+           sign_dict[b[0], b[1]] * sign_dict[b[1], b[2]] * sign_dict[b[2], b[3]] * sign_dict[b[3], b[0]] > 0]
+    # unbalanced butterflies
+    ubbf = [b for b in butterflies if
+            sign_dict[b[0], b[1]] * sign_dict[b[1], b[2]] * sign_dict[b[2], b[3]] * sign_dict[b[3], b[0]] < 0]
+    # ++++
+    b1 = [b for b in bbf if
+          sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == 4]
+    # +--+
+    b2 = [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[3], b[0]] == 2 and
+          sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] == -2]
+    b2 += [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[3], b[0]] == -2 and
+           sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] == 2]
+    # ++--
+    b3 = [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] == 2 and
+          sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == -2]
+    b3 += [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] == -2 and
+           sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == 2]
+    # +-+-
+    b4 = [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[2], b[3]] == 2 and
+          sign_dict[b[1], b[2]] + sign_dict[b[3], b[0]] == -2]
+    b4 += [b for b in bbf if sign_dict[b[0], b[1]] + sign_dict[b[2], b[3]] == -2 and
+           sign_dict[b[1], b[2]] + sign_dict[b[3], b[0]] == 2]
+    # ----
+    b5 = [b for b in bbf if
+          sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == -4]
+
+    # +++-
+    ub1 = [b for b in ubbf if
+           sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == 2]
+    # +---
+    ub2 = [b for b in ubbf if
+           sign_dict[b[0], b[1]] + sign_dict[b[1], b[2]] + sign_dict[b[2], b[3]] + sign_dict[b[3], b[0]] == -2]
+
+    return (np.array([len(bbf), len(ubbf), len(b1), len(b2), len(b3), len(b4), len(b5), len(ub1), len(ub2)]) / \
+            len(butterflies)).round(3)
+
+
+def load_edge_index(dataset: str, mode: str, round: int):
+    """invoke in the root directory
+    mode can be 'train', 'val' and 'test'
+    """
     import os
     import torch
-    prefix = "train_" if train else "test_"
-    data_path = os.path.join('datasets', 'processed', dataset, f'{prefix}{round}.pt')
+    data_path = os.path.join('datasets', 'processed', dataset, f'{mode}_{round}.pt')
     return torch.load(data_path)
 
 
@@ -136,11 +187,13 @@ def load_nlp_emb(path: str, df: pd.DataFrame = None, method: str = None):
 if __name__ == "__main__":
     import os
     import argparse
+    import torch
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=2023, help='Random seed.')
     parser.add_argument('--splits', type=int, default=10, help='How many times to split the dataset.')
-    parser.add_argument('--dataset', type=str, default='Biology', help='The dataset to be used.')
+    parser.add_argument('--dataset', type=str, default='Biology', choices=['Biology', 'Law', 'Psychology'],
+                        help='The dataset to be used.')
     args = parser.parse_args()
     print(args)
 
@@ -149,5 +202,6 @@ if __name__ == "__main__":
     question_path = os.path.join('..', 'datasets', 'PeerWiseData', args.dataset, 'Questions_CourseX.xlsx')
 
     answer, question, merged, data_info = load_csv(answer_path, question_path)
+    edge_index = torch.tensor(merged[['UserID', 'QuestionID', 'Sign']].values)
     # save_edge_index(merged, args)
     # load_nlp_emb("none", merged, "glove")
