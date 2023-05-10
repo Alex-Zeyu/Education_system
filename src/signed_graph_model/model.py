@@ -104,7 +104,7 @@ class GAT_CL(torch.nn.Module):
         edge_index = edge_index.detach().numpy()
         val = val.detach().numpy()
         A = scipy.sparse.coo_matrix((val, edge_index), shape=(N, N))
-        svd = TruncatedSVD(n_components=self.in_channels, n_iter=128)
+        svd = TruncatedSVD(n_components=self.emb_size, n_iter=128)
         svd.fit(A)
         x = svd.components_.T
         return torch.from_numpy(x).to(torch.float).to(pos_edge_index.device)

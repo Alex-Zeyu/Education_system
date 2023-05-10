@@ -37,6 +37,8 @@ if __name__ == '__main__':
     model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
+    # x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
+
 
     def test(model: SignedGCN, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor,
              epoch, mode='test') -> dict:
@@ -73,16 +75,19 @@ if __name__ == '__main__':
     def run(round_i: int):
         model.load_state_dict(model_state_dict)
 
-        # load train-test dataset
-        g_train = load_edge_index(args.dataset, train=True, round=round_i).to(device)
-        g_test = load_edge_index(args.dataset, train=False, round=round_i).to(device)
-        train_pos_edge_index, train_neg_edge_index = g_train[0:2, g_train[2] > 0], g_train[0:2, g_train[2] < 0]
-        test_pos_edge_index, test_neg_edge_index = g_test[0:2, g_test[2] > 0], g_test[0:2, g_test[2] < 0]
+        # load train, val and test set
+        g_train = load_edge_index(args.dataset, mode='train', round=round_i).to(device)
+        g_val = load_edge_index(args.dataset, mode='val', round=round_i).to(device)
+        g_test = load_edge_index(args.dataset, mode='test', round=round_i).to(device)
+        train_pos_edge_index, val_pos_edge_index, test_pos_edge_index = \
+            g_train[0:2, g_train[2] > 0], g_val[0:2, g_val[2] > 0], g_test[0:2, g_test[2] > 0]
+        train_neg_edge_index, val_neg_edge_index, test_neg_edge_index = \
+            g_train[0:2, g_train[2] < 0], g_val[0:2, g_val[2] < 0], g_test[0:2, g_test[2] < 0]
 
         x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)  # embeddings
 
         # train the model
-        lowest_loss, best_res = np.Inf, {}
+        best_res = {'val_auc': 0, 'val_f1': 0}
 
         # train the model
         for epoch in tqdm(range(args.epochs)):
@@ -92,12 +97,13 @@ if __name__ == '__main__':
             loss = model.loss(z, train_pos_edge_index, train_neg_edge_index)
             loss.backward()
             optimizer.step()
-            if loss < lowest_loss:
-                lowest_loss = loss
-                model.eval()  # evaluate the model
-                with torch.no_grad():
-                    z = model(x, train_pos_edge_index, train_neg_edge_index)
-                best_res.update(test(model, z, train_pos_edge_index, train_neg_edge_index, epoch, mode='train'))
+
+            model.eval()
+            with torch.no_grad():
+                z = model(x, train_pos_edge_index, train_neg_edge_index)
+            val_res = test(model, z, val_pos_edge_index, val_neg_edge_index, epoch, mode='val')
+            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
+                best_res.update(val_res)
                 best_res.update(test(model, z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 
         print(f'Round {round_i} done.')
