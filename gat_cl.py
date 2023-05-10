@@ -4,7 +4,6 @@ if __name__ == '__main__':
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import copy
     import torch
-    import numpy as np
     from tqdm import tqdm
     from torch_geometric import seed_everything
     from src.signed_graph_model.model import GAT_CL
@@ -77,7 +76,7 @@ if __name__ == '__main__':
         edge_index_g2_neg = g2[0:2, g2[2] < 0]
 
         # train the model
-        best_res = {'val_auc': 0, 'val_f1': 0}
+        best_res = {'val_auc': 0, 'val_macro_f1': 0}
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
@@ -100,7 +99,7 @@ if __name__ == '__main__':
                 y_score_val = model.predict_edges(z, g_val[0], g_val[1])
             val_res = test_and_val(y_score_val, y_label_val, mode='val', epoch=epoch)
 
-            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
+            if val_res['val_auc'] + val_res['val_macro_f1'] > best_res['val_auc'] + best_res['val_macro_f1']:
                 best_res.update(val_res)
                 y_score_test = model.predict_edges(z, g_test[0], g_test[1])
                 best_res.update(test_and_val(y_score_test, y_label_test, mode='test', epoch=epoch))
