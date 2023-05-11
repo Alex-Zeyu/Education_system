@@ -37,7 +37,7 @@ if __name__ == '__main__':
     model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
-    x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
+    # x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
 
 
     def test(model: SignedGCN, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor,
@@ -84,10 +84,10 @@ if __name__ == '__main__':
         train_neg_edge_index, val_neg_edge_index, test_neg_edge_index = \
             g_train[0:2, g_train[2] < 0], g_val[0:2, g_val[2] < 0], g_test[0:2, g_test[2] < 0]
 
-        # x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)  # embeddings
+        x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)  # embeddings
 
         # train the model
-        best_res = {'val_auc': 0, 'val_macro_f1': 0}
+        best_res = {'val_auc': 0, 'val_f1': 0}
 
         # train the model
         for epoch in tqdm(range(args.epochs)):
@@ -102,7 +102,7 @@ if __name__ == '__main__':
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
             val_res = test(model, z, val_pos_edge_index, val_neg_edge_index, epoch, mode='val')
-            if val_res['val_auc'] + val_res['val_macro_f1'] > best_res['val_auc'] + best_res['val_macro_f1']:
+            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
                 best_res.update(val_res)
                 best_res.update(test(model, z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 

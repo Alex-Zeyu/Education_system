@@ -188,7 +188,7 @@ if __name__ == '__main__':
             g_train[0:2, g_train[2] < 0], g_val[0:2, g_val[2] < 0], g_test[0:2, g_test[2] < 0]
 
         # train the model
-        best_res = {'val_auc': 0, 'val_macro_f1': 0}
+        best_res = {'val_auc': 0, 'val_f1': 0}
 
         for epoch in tqdm(range(args.epochs)):
             model.train()
@@ -202,7 +202,7 @@ if __name__ == '__main__':
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
             val_res = model.test(z, val_pos_edge_index, val_neg_edge_index, epoch, mode='val')
-            if val_res['val_auc'] + val_res['val_macro_f1'] > best_res['val_auc'] + best_res['val_macro_f1']:
+            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
                 best_res.update(val_res)
                 best_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 
