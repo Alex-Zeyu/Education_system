@@ -1,5 +1,5 @@
 import torch
-from torch_geometric.nn import GATConv, SignedGCN
+from torch_geometric.nn import GCNConv
 import torch.nn.functional as F
 
 
@@ -12,8 +12,8 @@ class GAT_CL(torch.nn.Module):
         self.emb_size = args.emb_size
         self.num_layers = args.num_layers
 
-        self.layer_ab_pos = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
-        self.layer_ab_neg = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
+        self.layer_ab_pos = torch.nn.ModuleList([GCNConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
+        self.layer_ab_neg = torch.nn.ModuleList([GCNConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
         self.linear_combine = torch.nn.Linear(4 * self.emb_size, self.emb_size, bias=False)
         self.activation = torch.nn.PReLU()
         self.dropout = torch.nn.Dropout(p=args.dropout)
