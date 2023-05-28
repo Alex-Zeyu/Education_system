@@ -1,5 +1,7 @@
 if __name__ == '__main__':
     import os
+
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import pickle
     import copy
     import torch
@@ -26,6 +28,7 @@ if __name__ == '__main__':
 
     # init settings
     device = 'cuda' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
+    torch.use_deterministic_algorithms(True)
 
     # data information
     with open(os.path.join('datasets', 'processed', args.dataset, 'data_info.pkl'), 'rb') as f:
@@ -37,7 +40,7 @@ if __name__ == '__main__':
     model_state_dict = copy.deepcopy(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
-    # x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
+    x = torch.randn(size=(data_info['user_num'] + data_info['ques_num'], args.emb_size)).to(device)
 
 
     def test(model: SignedGCN, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor,
@@ -76,15 +79,15 @@ if __name__ == '__main__':
         model.load_state_dict(model_state_dict)
 
         # load train, val and test set
-        g_train = load_edge_index(args.dataset, mode='train', round=round_i).to(device)
-        g_val = load_edge_index(args.dataset, mode='val', round=round_i).to(device)
-        g_test = load_edge_index(args.dataset, mode='test', round=round_i).to(device)
+        g_train, g_val, g_test = (
+            load_edge_index(args.dataset, mode='train', round=round_i).to(device),
+            load_edge_index(args.dataset, mode='val', round=round_i).to(device),
+            load_edge_index(args.dataset, mode='test', round=round_i).to(device)
+        )
         train_pos_edge_index, val_pos_edge_index, test_pos_edge_index = \
             g_train[0:2, g_train[2] > 0], g_val[0:2, g_val[2] > 0], g_test[0:2, g_test[2] > 0]
         train_neg_edge_index, val_neg_edge_index, test_neg_edge_index = \
             g_train[0:2, g_train[2] < 0], g_val[0:2, g_val[2] < 0], g_test[0:2, g_test[2] < 0]
-
-        x = model.create_spectral_features(train_pos_edge_index, train_neg_edge_index)  # embeddings
 
         # train the model
         best_res = {'val_auc': 0, 'val_f1': 0}
@@ -102,7 +105,7 @@ if __name__ == '__main__':
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
             val_res = test(model, z, val_pos_edge_index, val_neg_edge_index, epoch, mode='val')
-            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
+            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1'] and epoch >= 100:
                 best_res.update(val_res)
                 best_res.update(test(model, z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 

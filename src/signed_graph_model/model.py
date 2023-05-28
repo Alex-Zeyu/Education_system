@@ -1,19 +1,19 @@
 import torch
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GATConv
 import torch.nn.functional as F
 
 
-class GAT_CL(torch.nn.Module):
+class GATCL(torch.nn.Module):
     """Use contrastive learning to get an embedding for each node"""
 
     def __init__(self, args):
-        super(GAT_CL, self).__init__()
+        super(GATCL, self).__init__()
         self.args = args
         self.emb_size = args.emb_size
-        self.num_layers = args.num_layers
+        self.emb, self.norm_emb = None, None  # final embeddings
 
-        self.layer_ab_pos = torch.nn.ModuleList([GCNConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
-        self.layer_ab_neg = torch.nn.ModuleList([GCNConv(self.emb_size, self.emb_size) for _ in range(self.num_layers)])
+        self.layer_ab_pos = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(args.num_layers)])
+        self.layer_ab_neg = torch.nn.ModuleList([GATConv(self.emb_size, self.emb_size) for _ in range(args.num_layers)])
         self.linear_combine = torch.nn.Linear(4 * self.emb_size, self.emb_size, bias=False)
         self.activation = torch.nn.PReLU()
         self.dropout = torch.nn.Dropout(p=args.dropout)
@@ -46,14 +46,12 @@ class GAT_CL(torch.nn.Module):
         # dropout
         emb_g1_pos, emb_g2_pos = self.dropout(emb_g1_pos), self.dropout(emb_g2_pos)
         emb_g1_neg, emb_g2_neg = self.dropout(emb_g1_neg), self.dropout(emb_g2_neg)
-        return emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg
 
-    def reset_parameters(self):
-        self.link_mlp.reset_parameters()
-        for layer in self.layer_ab_pos:
-            layer.reset_parameters()
-        for layer in self.layer_ab_neg:
-            layer.reset_parameters()
+        # final embeddings
+        self.emb = self.linear_combine(torch.cat([emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg], dim=-1))
+        self.norm_emb = self.norm_emb = F.normalize(self.emb, p=2, dim=1)
+
+        return emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg
 
     def predict_edges(self, emb, uid, qid):
         """Predict the sign of edges given embeddings and user id, question id"""
@@ -66,55 +64,7 @@ class GAT_CL(torch.nn.Module):
             y_score.device)
         return F.binary_cross_entropy_with_logits(y_score, y_label, pos_weight=pos_weight)
 
-    # Borrowed from:
-    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/models/signed_gcn.py
-    def create_spectral_features(
-            self,
-            pos_edge_index,
-            neg_edge_index
-    ):
-        r"""Creates :obj:`in_channels` spectral node features based on
-        positive and negative edges.
-
-        Args:
-            pos_edge_index (LongTensor): The positive edge indices.
-            neg_edge_index (LongTensor): The negative edge indices.
-        """
-        import scipy.sparse
-        from sklearn.decomposition import TruncatedSVD
-        from torch_geometric.utils import coalesce
-
-        edge_index = torch.cat([pos_edge_index, neg_edge_index], dim=1)
-        N = edge_index.max().item() + 1
-        edge_index = edge_index.to(torch.device('cpu'))
-
-        pos_val = torch.full((pos_edge_index.size(1),), 2, dtype=torch.float)
-        neg_val = torch.full((neg_edge_index.size(1),), 0, dtype=torch.float)
-        val = torch.cat([pos_val, neg_val], dim=0)
-
-        row, col = edge_index
-        edge_index = torch.cat([edge_index, torch.stack([col, row])], dim=1)
-        val = torch.cat([val, val], dim=0)
-
-        edge_index, val = coalesce(edge_index, val, num_nodes=N)
-        val = val - 1
-
-        # Borrowed from:
-        # https://github.com/benedekrozemberczki/SGCN/blob/master/src/utils.py
-        edge_index = edge_index.detach().numpy()
-        val = val.detach().numpy()
-        A = scipy.sparse.coo_matrix((val, edge_index), shape=(N, N))
-        svd = TruncatedSVD(n_components=self.emb_size, n_iter=128)
-        svd.fit(A)
-        x = svd.components_.T
-        return torch.from_numpy(x).to(torch.float).to(pos_edge_index.device)
-
-    def compute_contrastive_loss(
-            self,
-            emb_g1_pos,
-            emb_g2_pos,
-            emb_g1_neg,
-            emb_g2_neg):
+    def compute_contrastive_loss(self, emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg):
         nodes_num, feature_size = emb_g1_pos.shape
 
         norm_emb_g1_pos = F.normalize(emb_g1_pos, p=2, dim=1)
@@ -158,10 +108,7 @@ class GAT_CL(torch.nn.Module):
         inter_pos = inter_contrastive(norm_emb_g1_pos, norm_emb_g2_pos)
         inter_neg = inter_contrastive(norm_emb_g1_neg, norm_emb_g2_neg)
 
-        self.embs = self.linear_combine(torch.cat([emb_g1_pos, emb_g2_pos, emb_g1_neg, emb_g2_neg], dim=-1))
-        self.norm_embs = F.normalize(self.embs, p=2, dim=1)
-
-        intra = intra_contrastive(self.norm_embs, norm_emb_g1_pos, norm_emb_g1_neg,
+        intra = intra_contrastive(self.norm_emb, norm_emb_g1_pos, norm_emb_g1_neg,
                                   norm_emb_g2_pos, norm_emb_g2_neg)
         return (1 - self.args.alpha) * (inter_pos + inter_neg) + self.args.alpha * intra
 

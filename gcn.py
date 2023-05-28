@@ -139,6 +139,8 @@ class GCN(torch.nn.Module):
 
 if __name__ == '__main__':
     import os
+
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import pickle
     import copy
     from tqdm import tqdm
@@ -162,6 +164,7 @@ if __name__ == '__main__':
 
     # init settings
     device = 'cuda' if not args.no_cuda and torch.cuda.is_available() else 'cpu'
+    torch.use_deterministic_algorithms(True)
 
     # data information
     with open(os.path.join('datasets', 'processed', args.dataset, 'data_info.pkl'), 'rb') as f:
@@ -179,9 +182,11 @@ if __name__ == '__main__':
         model.load_state_dict(model_state_dict)
 
         # load train, val and test set
-        g_train = load_edge_index(args.dataset, mode='train', round=round_i).to(device)
-        g_val = load_edge_index(args.dataset, mode='val', round=round_i).to(device)
-        g_test = load_edge_index(args.dataset, mode='test', round=round_i).to(device)
+        g_train, g_val, g_test = (
+            load_edge_index(args.dataset, mode='train', round=round_i).to(device),
+            load_edge_index(args.dataset, mode='val', round=round_i).to(device),
+            load_edge_index(args.dataset, mode='test', round=round_i).to(device)
+        )
         train_pos_edge_index, val_pos_edge_index, test_pos_edge_index = \
             g_train[0:2, g_train[2] > 0], g_val[0:2, g_val[2] > 0], g_test[0:2, g_test[2] > 0]
         train_neg_edge_index, val_neg_edge_index, test_neg_edge_index = \
@@ -202,7 +207,7 @@ if __name__ == '__main__':
             with torch.no_grad():
                 z = model(x, train_pos_edge_index, train_neg_edge_index)
             val_res = model.test(z, val_pos_edge_index, val_neg_edge_index, epoch, mode='val')
-            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1']:
+            if val_res['val_auc'] + val_res['val_f1'] > best_res['val_auc'] + best_res['val_f1'] and epoch >= 100:
                 best_res.update(val_res)
                 best_res.update(model.test(z, test_pos_edge_index, test_neg_edge_index, epoch, mode='test'))
 
