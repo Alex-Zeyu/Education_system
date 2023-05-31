@@ -37,15 +37,60 @@ class GraphData:
         self.data = self.data.to_numpy()
         self.data[:, 1] += self.usr_num  # add offset to question id
 
-    def summary(self):
+    def __repr__(self) -> str:
         """Print some information about the data"""
-        print('\nData Summary:')
-        print(f'number of edges: {len(self.data)}')
-        print(f'number of users: {self.usr_num}')
-        print(f'number of questions: {self.qus_num}\n')
+        return ('Data Summary: \n'
+                f'number of nodes: {self.usr_num + self.qus_num}\n'
+                f'number of users: {self.usr_num}\n'
+                f'number of questions: {self.qus_num}\n'
+                f'number of edges: {len(self.data)}\n'
+                f'number of positive edges: {(self.data[:, 2] == 1).sum()}\n'
+                f'number of negative edges: {(self.data[:, 2] == -1).sum()}\n'
+                )
+
+    def get_balance_score(self, show: bool = False) -> float:
+        import networkx as nx
+
+        sign_dict = {}
+        G = nx.Graph()
+        for src, dst, sign in self.data:
+            sign_dict[(src, dst)] = sign
+            sign_dict[(dst, src)] = sign
+            G.add_edge(src, dst)
+        circles = nx.cycle_basis(G)
+        butflys = [circle for circle in circles if len(circle) == 4]
+        balance_butflys = [b for b in butflys if
+                           sign_dict[b[0], b[1]] * sign_dict[b[1], b[2]] * sign_dict[b[2], b[3]] * sign_dict[
+                               b[3], b[0]] > 0]
+        balance_score = len(balance_butflys) / len(butflys)
+
+        if show:
+            print(f'number of butterflies: {len(butflys)}')
+            print(f'number of balance butterflies: {len(balance_butflys)}')
+            print(f'balance score: {balance_score}')
+        return balance_score
+
+    def get_question_df(self) -> pd.DataFrame:
+        qus_valid = self.ans[['QuestionID']].merge(self.qus, on='QuestionID')
+        qus_valid = qus_valid.drop_duplicates(subset=['QuestionID']).sort_values(by=['QuestionID'], ignore_index=True)
+        return qus_valid
+
+    def get_undirected_edge_index_with_sign(self) -> torch.Tensor:
+        return torch.from_numpy(np.concatenate((self.data[:, [0, 1, 2]], self.data[:, [1, 0, 2]]), axis=0)).T
 
 
-def create_perspectives(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def split_edges_undirected(edge_index: torch.Tensor, test_ratio: float = 0.2) -> tuple[torch.Tensor, torch.Tensor]:
+    mask = torch.ones(edge_index.size(1) // 2, dtype=torch.bool)  # number of undirected edges
+    mask[torch.randperm(mask.size(0))[:int(test_ratio * mask.size(0))]] = 0
+    mask = torch.cat([mask, mask], dim=0)
+
+    train_edge_index = edge_index[:, mask]
+    test_edge_index = edge_index[:, ~mask]
+
+    return train_edge_index, test_edge_index
+
+
+def create_perspectives(arr: np.ndarray, args) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return perspective 1 (inter): edge index user->question &
     perspective 2 (intra): edge index user->user, question->question
     """
@@ -82,16 +127,22 @@ def create_perspectives(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nda
     perspective_2_q = []
 
     for u in adj_list_u_u.keys():
-        for u2, sign in adj_list_u_u[u].items():
+        for u2, val in adj_list_u_u[u].items():
             if u == u2:
                 continue
-            perspective_2_u.append([u, u2, sign])
+            if val >= args.usr_pos_thres:
+                perspective_2_u.append([u, u2, 1])
+            elif val <= args.usr_neg_thres:  # should be a negative number
+                perspective_2_u.append([u, u2, -1])
 
     for q in adj_list_q_q.keys():
-        for q2, sign in adj_list_q_q[q].items():
+        for q2, val in adj_list_q_q[q].items():
             if q == q2:
                 continue
-            perspective_2_q.append([q, q2, sign])
+            if val >= args.qus_pos_thres:
+                perspective_2_q.append([q, q2, 1])
+            elif val <= args.qus_neg_thres:  # should be a negative number
+                perspective_2_q.append([q, q2, -1])
 
     return perspective_1, np.array(perspective_2_u).T, np.array(perspective_2_q).T
 
@@ -113,6 +164,25 @@ def train_test_split(arr: np.ndarray, test_ratio: float, seed: int) -> tuple[np.
     trn_arr = arr[~mask, :]
     tst_arr = arr[mask, :]
     return trn_arr, tst_arr
+
+
+def split_edges(edge_index: torch.Tensor, test_ratio: float = 0.2) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Splits the edges :obj:`edge_index` into train and test edges.
+
+    Args:
+        edge_index (LongTensor): The edge indices.
+        test_ratio (float, optional): The ratio of test edges.
+            (default: :obj:`0.2`)
+
+    Source: https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/nn/models/signed_gcn.html#SignedGCN.split_edges
+    """
+    mask = torch.ones(edge_index.size(1), dtype=torch.bool)
+    mask[torch.randperm(mask.size(0))[:int(test_ratio * mask.size(0))]] = 0
+
+    train_edge_index = edge_index[:, mask]
+    test_edge_index = edge_index[:, ~mask]
+
+    return train_edge_index, test_edge_index
 
 
 def perturb_structure(perspective: np.ndarray, augment: str, args) -> torch.Tensor:
