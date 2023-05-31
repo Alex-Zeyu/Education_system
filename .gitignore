@@ -1,4 +1,4 @@
 *.pyc
 .idea/
-datasets/processed/
+datasets/Sydney_Cardiff_PW_Data/
 *temp*.*
