@@ -1,4 +1,6 @@
 *.pyc
 .idea/
+.ipynb_checkpoints/
 datasets/Sydney_Cardiff_PW_Data/
+results/
 *temp*.*
