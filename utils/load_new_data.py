@@ -4,8 +4,6 @@ import pandas as pd
 """
 The new datasets are: Sydney, Sydney_AdditionalLTISet and Cardiff, the Sydney_AdditionalLTISet dataset is too small 
 (3532 edges for the largest course) thus is ignored.
-Here we use the largest course in Sydney dataset (course_id: 23146 response=1), and smallest 2 courses in Cardiff 
-dataset (course_id: 20102, 20188, response=1)
 """
 
 
